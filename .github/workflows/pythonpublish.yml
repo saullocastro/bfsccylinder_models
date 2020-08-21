@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         runs-on: [windows-latest, ubuntu-latest]
-        python-version: [3.6, 3.7, 3.8]
+        python-version: [3.6, 3.7]
     runs-on:  ${{ matrix.runs-on }}
     steps:
     - uses: actions/checkout@v2
@@ -34,13 +34,13 @@ jobs:
       run: |
         twine upload dist/*.whl
     - name: Build manylinux Python wheels
-      if: matrix.runs-on == 'ubuntu-latest' && matrix.python-version == 3.8
+      if: matrix.runs-on == 'ubuntu-latest' && matrix.python-version == 3.7
       uses: RalfG/python-wheels-manylinux-build@v0.3.1-manylinux2010_x86_64
       with:
         python-versions: 'cp36-cp36m cp37-cp37m'
         build-requirements: 'pip cython numpy scipy setuptools wheel twine'
     - name: Publish manylinux Python wheels
-      if: matrix.runs-on == 'ubuntu-latest' && matrix.python-version == 3.8
+      if: matrix.runs-on == 'ubuntu-latest' && matrix.python-version == 3.7
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
