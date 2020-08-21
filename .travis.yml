@@ -1,0 +1,33 @@
+language: python
+
+dist: xenial
+
+cache: false
+
+sudo: false
+
+python:
+  - "3.6"
+  - "3.7"
+  - "3.8"
+
+before_install:
+  - sudo apt-get update
+  - pip install -r requirements.txt
+  - pip install --upgrade -r requirements.txt
+
+install:
+  - travis_wait 40 python setup.py build_ext --inplace --force --define CYTHON_TRACE_NOGIL
+
+script:
+  - coverage run -m py.test tests
+  - coverage report
+
+after_success:
+  - coveralls
+
+notifications:
+  email:
+    on_success: change
+    on_failure: change
+

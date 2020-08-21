@@ -1,0 +1,23 @@
+version.py
+# Build related
+models_core.cpp 
+build
+dist
+.coverage
+.pytest_cache
+*.egg-info
+# Temp files
+.ipynb_checkpoints
+tmp*
+temp*
+tmp*.*
+temp*.*
+.cache
+
+# Python compiled files
+*.pyc
+*.pyo
+*.pyd
+
+models_core.c 
+models_core.html 
