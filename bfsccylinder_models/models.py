@@ -1,6 +1,6 @@
 from .models_core import flinearBucklingVATCylinder_x
 
-def linearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desvars,
+def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
             clamped=True, cg_x0=None, lobpcg_X=None):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
@@ -20,6 +20,8 @@ def linearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desvar
         Cylinder radius
     nx : int
         Number of nodes along axial direction (odd number recommended)
+    ny : int
+        Number of nodes along circumferential direction (odd number recommended)
     E11, E22, nu12, G12 : float
         Orthotropic material properties
     tow_thick : float
@@ -43,5 +45,5 @@ def linearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desvar
         out['lobpcg_X'] = eigenvalue initial guess
 
     """
-    return flinearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desvars,
+    return flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
             clamped, cg_x0, lobpcg_X)

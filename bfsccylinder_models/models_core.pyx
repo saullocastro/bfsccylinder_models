@@ -10,13 +10,10 @@ from bfsccylinder.quadrature import get_points_weights
 from .vatfunctions import theta_VAT_P_x
 
 
-def flinearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desvars,
+def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
             clamped=True, cg_x0=None, lobpcg_X=None):
     # geometry our FW cylinders
     circ = 2*pi*R # m
-
-    # number of nodes
-    ny = int(nx*circ/L)
 
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
@@ -165,12 +162,9 @@ def flinearBucklingVATCylinder_x(L, R, nx, E11, E22, nu12, G12, tow_thick, desva
     # solving
     PREC = 1/Kuu.diagonal().mean()
 
-    if False:
-        uu, info = cg(PREC*Kuu, PREC*fu, tol=1e-9, x0=cg_x0)
-        cg_x0 = uu.copy()
-        assert info == 0
-    else:
-        uu = spsolve(PREC*Kuu, PREC*fu)
+    uu, info = cg(PREC*Kuu, PREC*fu, x0=cg_x0, atol=0)
+    cg_x0 = uu.copy()
+    assert info == 0
 
     u[bu] = uu
 
