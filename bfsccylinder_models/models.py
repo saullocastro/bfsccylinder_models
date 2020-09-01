@@ -1,6 +1,6 @@
 from .models_core import flinearBucklingVATCylinder_x
 
-def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
+def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
             clamped=True, cg_x0=None, lobpcg_X=None):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
@@ -24,6 +24,8 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, de
         Number of nodes along circumferential direction (odd number recommended)
     E11, E22, nu12, G12 : float
         Orthotropic material properties
+    rho : float
+        Density of orthotropic material
     tow_thick : float
         FW tow thickness
     desvars : list
@@ -38,12 +40,12 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, de
 
     Returns
     -------
-    Pcr : float
-        Critical buckling load
     out : dict
+        out['Pcr'] = critical buckling load
         out['cg_x0'] = static initial guess
         out['lobpcg_X'] = eigenvalue initial guess
+        out['mass'] = mass
 
     """
-    return flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
+    return flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
             clamped, cg_x0, lobpcg_X)

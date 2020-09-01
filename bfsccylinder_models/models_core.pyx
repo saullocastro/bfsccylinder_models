@@ -10,8 +10,8 @@ from bfsccylinder.quadrature import get_points_weights
 from .vatfunctions import theta_VAT_P_x
 
 
-def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, desvars,
-            clamped=True, cg_x0=None, lobpcg_X=None):
+def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
+        tow_thick, desvars, clamped=True, cg_x0=None, lobpcg_X=None):
     # geometry our FW cylinders
     circ = 2*pi*R # m
 
@@ -51,6 +51,7 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, d
     init_k_KC0 = 0
     init_k_KG = 0
     laminaprop = (E11, E22, nu12, G12, G12, G12)
+    mass = 0
     print('# starting element assembly')
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
         shell = BFSCCylinder(nint)
@@ -66,6 +67,7 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, d
         shell.lex = L/(nx-1)
         shell.ley = circ/ny
         for i in range(nint):
+            wi = weights[i]
             x1 = ncoords[nid_pos[n1]][0]
             x2 = ncoords[nid_pos[n2]][0]
             xi = points[i]
@@ -95,6 +97,10 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, d
             lam = read_stack(stack=stack,
                     plyts=plyts, laminaprop=laminaprop)
             for j in range(nint):
+                wj = weights[j]
+                weight = wi*wj
+                mass += weight*shell.lex*shell.ley/4*sum(plyts)*rho
+
                 shell.A11[i, j] = lam.ABD[0, 0]
                 shell.A12[i, j] = lam.ABD[0, 1]
                 shell.A16[i, j] = lam.ABD[0, 2]
@@ -215,7 +221,9 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, tow_thick, d
     print('critical buckling load,', Pcr)
 
     out = {}
+    out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
     out['lobpcg_X'] = Xu
+    out['mass'] = mass
 
-    return Pcr, out
+    return out
