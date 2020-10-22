@@ -11,7 +11,7 @@ from .vatfunctions import theta_VAT_P_x
 
 
 def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
-        tow_thick, desvars, clamped=True, cg_x0=None, lobpcg_X=None):
+        tow_thick, desvars, clamped=True, cg_x0=None, lobpcg_X=None, nint=4):
     # geometry our FW cylinders
     circ = 2*pi*R # m
 
@@ -39,7 +39,6 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
     n3s = nids_mesh[1:, 1:].flatten()
     n4s = nids_mesh[:-1, 1:].flatten()
 
-    nint = 4
     points, weights = get_points_weights(nint=nint)
 
     num_elements = len(n1s)
@@ -166,11 +165,14 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
     Nu = N - bk.sum()
 
     # solving
-    PREC = 1/Kuu.diagonal().mean()
+    PREC = 1/Kuu.diagonal().max()
 
     uu, info = cg(PREC*Kuu, PREC*fu, x0=cg_x0, atol=0)
+    if info != 0:
+        print('#   failed with cg()')
+        print('#   trying spsolve()')
+        uu = spsolve(Kuu, fu)
     cg_x0 = uu.copy()
-    assert info == 0
 
     u[bu] = uu
 
@@ -209,8 +211,13 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
     tol = 1e-5
     eigvals, eigvecsu, hist = lobpcg(A=PREC*Kuu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
             maxiter=maxiter, retResidualNormsHistory=True, tol=tol)
-    assert len(hist) <= maxiter
     load_mult = eigvals
+    if not len(hist) <= maxiter:
+        print('#   failed with lobpcg()')
+        print('#   trying eigsh()')
+        eigvals, eigvecsu = eigsh(A=Kuu, k=num_eigvals, which='SM', M=KGuu,
+                tol=1e-7, sigma=1., mode='buckling')
+        load_mult = -eigvals
 
     print('# finished linear buckling analysis')
 
