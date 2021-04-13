@@ -1,7 +1,7 @@
 from .models_core import flinearBucklingVATCylinder_x
 
 def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
-            clamped=True, cg_x0=None, lobpcg_X=None, nint=4):
+            clamped=True, cg_x0=None, lobpcg_X=None, nint=4, num_eigvals=2):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
     the axial direction (x)
@@ -39,6 +39,8 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thic
         Initial guess for eigenvectors in the eigenvalue analysis
     nint : int, optional
         Number of integration points per direction
+    num_eigvals : int, optional
+        Number of eigenvalues to extract
 
     Returns
     -------
@@ -47,7 +49,8 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thic
         out['cg_x0'] = static initial guess
         out['lobpcg_X'] = eigenvalue initial guess
         out['mass'] = mass
+        out['eigvecs'] = eigenvectors
 
     """
     return flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
-            clamped, cg_x0, lobpcg_X, nint)
+            clamped, cg_x0, lobpcg_X, nint, num_eigvals)
