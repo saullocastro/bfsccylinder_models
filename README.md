@@ -1,9 +1,5 @@
 Models using the BFSCCylinder element
 
-Travis-CI status:
-
-[![Build Status](https://travis-ci.com/saullocastro/bfsccylinder_models.svg?token=42zpXqXADpxR3nr2TD7y&branch=master)](https://travis-ci.com/saullocastro/bfsccylinder_models)
-
 Github Actions status:
 
 [![Actions Status](https://github.com/saullocastro/bfsccylinder_models/workflows/pytest/badge.svg)](https://github.com/saullocastro/bfsccylinder_models/actions)
