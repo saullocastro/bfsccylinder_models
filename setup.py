@@ -111,6 +111,14 @@ extensions = [
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         language='c++'),
+    Extension('bfsccylinder_models.linbuck_VAFW',
+        sources=[
+            './bfsccylinder_models/linbuck_VAFW.pyx',
+            ],
+        include_dirs=include_dirs,
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
+        language='c++'),
     ]
 
 ext_modules = cythonize(extensions,

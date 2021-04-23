@@ -11,7 +11,7 @@ from .vatfunctions import theta_VAT_P_x
 
 
 def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
-        tow_thick, desvars, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
+        h_tow, desvars, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
         num_eigvals=2):
     # geometry our FW cylinders
     circ = 2*pi*R # m
@@ -89,7 +89,7 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
                 stack.append(-theta_local)
 
                 steering_angle = abs(theta_min - theta_local)
-                plyt_local = tow_thick/np.cos(np.deg2rad(steering_angle))
+                plyt_local = h_tow/np.cos(np.deg2rad(steering_angle))
 
                 plyts.append(plyt_local)
                 plyts.append(plyt_local)
@@ -240,50 +240,60 @@ def flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho,
     return out
 
 
-def flinearBucklingCTS_circum(L, R, nx, ny, E11, E22, nu12, G12, rho,
-        tow_thick, n, f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None, nint=4):
-    #TODO here
-    h_c = tow_thick / np.cos(np.deg2rad(thetadeg_c))
-    h_s = tow_thick / np.cos(np.deg2rad(thetadeg_s))
-
+def flinearBucklingCTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
+        h_tow, n, f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None, nint=4):
     assert abs(thetadeg_s) > abs(thetadeg_c)
-    rCTS=50
-    s=0
-    c=0
+    assert f > 0
     t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_s))
-    #(2*t + s)*n = f*c*(n+1)
-    c = (2*t + s)*n/f/(n+1)
-
-    desvars = []
-
+    nmax = L/(2*t)
+    assert n >= nmax
+    cmax = (L - 2*t*n)/(n+1)
+    if not np.isclose(cmax, 0):
+        s = f/(n*(f + 1))*(L-2*t*n)
+        c = 1/(f*n + f + n + 1)*(L-2*t*n)
+    else:
+        s = 0
+        c = 0
+    assert np.isclose((2*t + s)*n + c*(n+1) - L, 0)
 
     # geometry our FW cylinders
     circ = 2*pi*R # m
 
+    nxt = 3
+    nxs = max(1, int(round(s/t*nxt, 0)))
+    nxc = max(1, int(round(c/t*nxt, 0)))
+
+    dx = t/(nxt-1)
+    if ny is None:
+        ny = int(round(circ/dx, 0))
+
+    xlin = np.linspace(0, c, nxc-1, endpoint=False)
+    thetalin = np.ones(nxc-1)*thetadeg_c
+    for i in range(n):
+        start = c + i*(c+2*t+s)
+        xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
+        thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
+        if nxs > 1:
+            xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
+            thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
+        xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
+        thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
+        if i == n-1:
+            endpoint = True
+            neff = nxc
+        else:
+            endpoint = False
+            neff = nxc-1
+        xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, neff, endpoint=endpoint)))
+        thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
+
+    nx = xlin.shape[0]
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
     # closing the cylinder by reassigning last row of node-ids
     nids_mesh[:, -1] = nids_mesh[:, 0]
     nids = np.unique(nids_mesh)
     nid_pos = dict(zip(nids, np.arange(len(nids))))
-
-    nxc = 4
-    nxs = 4
-    nxt = 2
-    xlin = np.linspace(0, c, nxc, endpoint=False).tolist()
-    for i in range(n):
-        xlin = xlin + np.linspace(i*(2*c+2*t+s), i*(2*c+2*t+s)+t, nxt,
-            endpoint=False).tolist()
-        xlin = xlin + np.linspace(i*(2*c+2*t+s)+t, i*(2*c+2*t+s)+t+s, nxs,
-            endpoint=False).tolist()
-        xlin = xlin + np.linspace(i*(2*c+2*t+s)+t+s, i*(2*c+2*t+s)+t+s+t, nxt,
-            endpoint=False).tolist()
-        if i == n-1:
-            endpoint = True
-        else:
-            endpoint = False
-        xlin = xlin + np.linspace(i*(2*c+2*t+s)+t+s+t, i*(2*c+2*t+s)+t+s+t+c, nxc,
-            endpoint=endpoint).tolist()
 
     ytmp = np.linspace(0, circ, ny+1)
     ylin = np.linspace(0, circ-(ytmp[-1] - ytmp[-2]), ny)
@@ -325,7 +335,7 @@ def flinearBucklingCTS_circum(L, R, nx, ny, E11, E22, nu12, G12, rho,
         shell.c3 = DOF*nid_pos[n3]
         shell.c4 = DOF*nid_pos[n4]
         shell.R = R
-        shell.lex = L/(nx-1)
+        shell.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
         shell.ley = circ/ny
         for i in range(nint):
             wi = weights[i]
@@ -335,29 +345,16 @@ def flinearBucklingCTS_circum(L, R, nx, ny, E11, E22, nu12, G12, rho,
             xlocal = x1 + (x2 - x1)*(xi + 1)/2
             assert xlocal > x1 and xlocal < x2
 
-            stack = []
-            plyts = []
-            for thetas in desvars:
-                #NOTE min(thetas) is not strictly correct
-                #     I kept it here for verification purposes against ABAQUS
-                #     a better model is to do min( theta(x) )
-                theta_min = min(thetas)
+            theta_local = np.interp(xlocal, xlin, thetalin)
+            steering_angle = theta_local - thetadeg_c
+            plyt_local = h_tow / np.cos(np.deg2rad(steering_angle))
 
-                theta_local = theta_VAT_P_x(xlocal, L, thetas)
-
-                #balanced laminate
-                stack.append(theta_local)
-                stack.append(-theta_local)
-
-                steering_angle = abs(theta_min - theta_local)
-                plyt_local = tow_thick/np.cos(np.deg2rad(steering_angle))
-
-                plyts.append(plyt_local)
-                plyts.append(plyt_local)
+            #balanced laminate
+            stack = (theta_local, -theta_local)
+            plyts = (plyt_local, plyt_local)
 
             offset = sum(plyts)/2.
-            prop = laminated_plate(stack=stack,
-                    plyts=plyts, laminaprop=laminaprop, offset=offset)
+            prop = laminated_plate(stack=stack, plyts=plyts, laminaprop=laminaprop, offset=offset)
             for j in range(nint):
                 wj = weights[j]
                 weight = wi*wj
@@ -495,5 +492,13 @@ def flinearBucklingCTS_circum(L, R, nx, ny, E11, E22, nu12, G12, rho,
     out['cg_x0'] = cg_x0
     out['lobpcg_X'] = Xu
     out['mass'] = mass
+    eigvecs = np.zeros((N, num_eigvals))
+    eigvecs[bu, :] = eigvecsu
+    out['eigvecs'] = eigvecs
+    out['xlin'] = xlin
+    out['thetalin'] = thetalin
+    out['t'] = t
+    out['s'] = s
+    out['c'] = c
 
     return out

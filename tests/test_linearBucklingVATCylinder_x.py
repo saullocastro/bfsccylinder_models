@@ -4,7 +4,8 @@ sys.path.append(r'../../bfsccylinder')
 
 import numpy as np
 
-from bfsccylinder_models.models import linearBucklingVATCylinder_x
+from bfsccylinder_models.models import linBuck_VAFW
+from bfsccylinder_models.vatfunctions import func_VAT_P_x
 
 def test_2_runs_in_seq():
     L = 0.3 # m
@@ -32,7 +33,7 @@ def test_2_runs_in_seq():
     theta_VP_3 = 75.8
     desvars = [[theta_VP_1, theta_VP_2, theta_VP_3]]
     out = linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12,
-            rho, tow_thick, desvars, clamped=True, cg_x0=out['cg_x0'],
+            rho, tow_thick, desvars, func_VAT_P_x, clamped=True, cg_x0=out['cg_x0'],
             lobpcg_X=out['lobpcg_X'])
 
 def test_Z33():
@@ -56,7 +57,7 @@ def test_Z33():
                [51, 51, 51],
               ]
     out = linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12,
-            rho, plyt, desvars, clamped=True)
+            rho, plyt, desvars, func_VAT_P_x, clamped=True)
     print(out)
 
 if __name__ == '__main__':

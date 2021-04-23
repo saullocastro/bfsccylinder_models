@@ -1,7 +1,8 @@
-from .models_core import flinearBucklingVATCylinder_x
+from .linbuck_VAFW import flinBuck_VAFW
 
-def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
-            clamped=True, cg_x0=None, lobpcg_X=None, nint=4, num_eigvals=2):
+def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
+        funcVAT, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
+        num_eigvals=2):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
     the axial direction (x)
@@ -15,32 +16,38 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thic
     Parameters
     ----------
     L : float
-        Cylinder length
+        Cylinder length.
     R : float
-        Cylinder radius
+        Cylinder radius.
     nx : int
-        Number of nodes along axial direction (odd number recommended)
+        Number of nodes along axial direction (odd number recommended).
     ny : int
-        Number of nodes along circumferential direction (odd number recommended)
+        Number of nodes along circumferential direction (even number
+        recommended).
     E11, E22, nu12, G12 : float
-        Orthotropic material properties
+        Orthotropic material properties.
     rho : float
-        Density of orthotropic material
+        Density of orthotropic material.
     tow_thick : float
-        FW tow thickness
+        FW tow thickness.
     desvars : list
         Each element of desvars is another list containing the variables
-        compatible with the VAT function being used. It is assumed that
-    clamped : bool
-        True if clamped, False if simply supported
+        compatible with the VAT function ``funcVAT`` being used.
+    funcVAT : function
+        VAT function in the form ``f(x, xmax, thetas)``, with ``x`` being the
+        axial direction, ``xmax`` the maximum value of ``x`` in the domain, and
+        ``thetas`` the angle values at the control points, such that the
+        ``desvars`` parameter is a sequence of ``thetas``.
+    clamped : bool, optional
+        ``True`` if clamped, ``False`` if simply supported.
     cg_x0 : array, optional
-        Initial guess for static solver
+        Initial guess for static solver.
     lobpcg_X : array, optional
-        Initial guess for eigenvectors in the eigenvalue analysis
+        Initial guess for eigenvectors in the eigenvalue analysis.
     nint : int, optional
-        Number of integration points per direction
+        Number of integration points per direction.
     num_eigvals : int, optional
-        Number of eigenvalues to extract
+        Number of eigenvalues to extract.
 
     Returns
     -------
@@ -52,5 +59,5 @@ def linearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thic
         out['eigvecs'] = eigenvectors
 
     """
-    return flinearBucklingVATCylinder_x(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
-            clamped, cg_x0, lobpcg_X, nint, num_eigvals)
+    return flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick,
+            desvars, funcVAT, clamped, cg_x0, lobpcg_X, nint, num_eigvals)

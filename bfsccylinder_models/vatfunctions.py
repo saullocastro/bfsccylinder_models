@@ -1,4 +1,4 @@
-def theta_VAT_P_x(x, L, thetas):
+def func_VAT_P_x(x, L, thetas):
     theta_VP_1, theta_VP_2, theta_VP_3 = thetas
     x1 = 0
     x2 = L/4
