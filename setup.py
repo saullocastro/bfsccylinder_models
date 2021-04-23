@@ -103,17 +103,17 @@ include_dirs = [
             ]
 
 extensions = [
-    Extension('bfsccylinder_models.models_core',
+    Extension('bfsccylinder_models.linbuck_VAFW',
         sources=[
-            './bfsccylinder_models/models_core.pyx',
+            './bfsccylinder_models/linbuck_VAFW.pyx',
             ],
         include_dirs=include_dirs,
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         language='c++'),
-    Extension('bfsccylinder_models.linbuck_VAFW',
+    Extension('bfsccylinder_models.koiter_CTS',
         sources=[
-            './bfsccylinder_models/linbuck_VAFW.pyx',
+            './bfsccylinder_models/koiter_CTS.pyx',
             ],
         include_dirs=include_dirs,
         extra_compile_args=compile_args,
