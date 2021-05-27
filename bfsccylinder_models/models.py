@@ -1,4 +1,6 @@
 from .linbuck_VAFW import flinBuck_VAFW
+from .koiter_CTS import fkoiter_CTS_circum
+from .koiter_cylinder import fkoiter_cyl_SS3
 
 def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
         funcVAT, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
@@ -61,3 +63,66 @@ def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
     """
     return flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick,
             desvars, funcVAT, clamped, cg_x0, lobpcg_X, nint, num_eigvals)
+
+
+def koiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+        param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
+        nint=4):
+    """
+    Linear buckling analysis of a VAT cylinder with properties changing over
+    the axial direction (x)
+
+    Assumptions:
+    - classical shell theory (when BFS element is used)
+    - monolithic laminated properties (only one material for the whole laminate)
+    - displacement controlled
+    - returns the critical buckling load in consistent force units
+
+    Parameters
+    ----------
+
+
+    Returns
+    -------
+    out : dict
+        out['Pcr'] = critical buckling load
+        out['cg_x0'] = static initial guess
+        out['lobpcg_X'] = eigenvalue initial guess
+        out['mass'] = mass
+        out['eigvecs'] = eigenvectors
+
+    """
+    return fkoiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+        param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
+        nint=4)
+
+
+def koiter_cylinder(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+        param_f, thetadeg_c, thetadeg_s, cg_x0=None, lobpcg_X=None,
+        nint=4, num_eigvals=2, koiter_num_modes=1):
+    """
+    Linear buckling analysis of a VAT cylinder with properties changing over
+    the axial direction (x)
+
+    Assumptions:
+    - classical shell theory (when BFS element is used)
+    - monolithic laminated properties (only one material for the whole laminate)
+    - displacement controlled
+    - returns the critical buckling load in consistent force units
+
+    Parameters
+    ----------
+
+
+    Returns
+    -------
+    out : dict
+        out['Pcr'] = critical buckling load
+        out['cg_x0'] = static initial guess
+        out['lobpcg_X'] = eigenvalue initial guess
+        out['mass'] = mass
+        out['eigvecs'] = eigenvectors
+
+    """
+    return fkoiter_cyl_SS3(L, R, rCTS, nxt, ny, prop, cg_x0,
+            lobpcg_X, nint, num_eigvals, koiter_num_modes)
