@@ -66,50 +66,58 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     Niab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
     Miab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
 
-    assert abs(thetadeg_s) > abs(thetadeg_c)
-    assert param_f > 0
-    t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
-    nmax = L/(2*t)
-    print('nmax', nmax)
-    assert param_n <= nmax
-    cmax = (L - 2*t*param_n)/(param_n+1)
-    if not np.isclose(cmax, 0):
-        s = param_f/(param_n*(param_f + 1))*(L-2*t*param_n)
-        c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
-    else:
-        s = 0
-        c = 0
-    assert np.isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
-
-    # geometry our FW cylinders
     circ = 2*pi*R # [m]
 
-    nxs = max(1, int(round(s/t*nxt, 0)))
-    nxc = max(1, int(round(c/t*nxt, 0)))
+    if param_n == 0 or param_f == 0:
+        assert ny is not None
+        nx = int(ny*L/circ)
+        if nx % 2 == 0:
+            nx += 1
+        xlin = np.linspace(0, L, nx)
+        thetalin = np.ones_like(xlin)*thetadeg_c
+        t = None
+        c = None
+        s = None
 
-    dx = t/(nxt-1)
-    if ny is None:
-        ny = int(round(circ/dx, 0))
-
-    xlin = np.linspace(0, c, nxc-1, endpoint=False)
-    thetalin = np.ones(nxc-1)*thetadeg_c
-    for i in range(param_n):
-        start = c + i*(c+2*t+s)
-        xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
-        thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
-        if nxs > 1:
-            xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
-            thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
-        xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
-        thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
-        if i == param_n-1:
-            endpoint = True
-            neff = nxc
+    else:
+        assert abs(thetadeg_s) > abs(thetadeg_c), 'thetadeg_s must be larger than thetadeg_c'
+        t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
+        nmax = L/(2*t)
+        print('nmax', nmax)
+        assert param_n <= nmax
+        cmax = (L - 2*t*param_n)/(param_n+1)
+        if not np.isclose(cmax, 0):
+            s = param_f/(param_n*(param_f + 1))*(L - 2*t*param_n)
+            c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
         else:
-            endpoint = False
-            neff = nxc-1
-        xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, neff, endpoint=endpoint)))
-        thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
+            s = 0
+            c = 0
+        assert np.isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+
+        dx = t/(nxt-1)
+        if ny is None:
+            ny = int(round(circ/dx, 0))
+        nxc = max(1, int(round(c/t*nxt, 0)))
+        nxs = max(1, int(round(s/t*nxt, 0)))
+        xlin = np.linspace(0, c, nxc-1, endpoint=False)
+        thetalin = np.ones(nxc-1)*thetadeg_c
+        for i in range(param_n):
+            start = c + i*(c+2*t+s)
+            xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
+            thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
+            if nxs > 1:
+                xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
+                thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
+            xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
+            thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
+            if i == param_n-1:
+                endpoint = True
+                neff = nxc
+            else:
+                endpoint = False
+                neff = nxc-1
+            xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, neff, endpoint=endpoint)))
+            thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
 
     nx = xlin.shape[0]
     nids = 1 + np.arange(nx*(ny+1))

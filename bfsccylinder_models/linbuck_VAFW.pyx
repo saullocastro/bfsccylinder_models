@@ -232,6 +232,7 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     out['mass'] = mass
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
+    out['eigvals'] = eigvals
     out['eigvecs'] = eigvecs
 
     return out
