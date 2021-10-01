@@ -67,7 +67,7 @@ def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
 
 def koiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
         param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
-        nint=4):
+        nint=4, koiter_num_modes=1):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
     the axial direction (x)
