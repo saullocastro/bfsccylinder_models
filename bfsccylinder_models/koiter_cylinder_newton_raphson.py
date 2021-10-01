@@ -1,7 +1,11 @@
 from functools import partial
 from collections import defaultdict
 
-from pypardiso import spsolve
+try:
+    from pypardiso import spsolve
+except:
+    from scipy.sparse.linalg import spsolve
+
 import numpy as np
 from numpy import isclose, pi
 from scipy.sparse import coo_matrix, csc_matrix
