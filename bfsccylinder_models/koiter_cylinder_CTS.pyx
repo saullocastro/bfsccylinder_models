@@ -153,25 +153,25 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     elements = []
     N = DOF*nx*ny
     print('# number of DOF,', N)
+    laminaprop = (E11, E22, nu12, G12, G12, G12)
     init_k_KC0 = 0
     init_k_KG = 0
-    laminaprop = (E11, E22, nu12, G12, G12, G12)
-    mass = 0
     print('# starting element assembly')
+    mass = 0
     havg = 0 # average shell thickness h
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
-        shell = BFSCCylinder(nint)
-        shell.n1 = n1
-        shell.n2 = n2
-        shell.n3 = n3
-        shell.n4 = n4
-        shell.c1 = DOF*nid_pos[n1]
-        shell.c2 = DOF*nid_pos[n2]
-        shell.c3 = DOF*nid_pos[n3]
-        shell.c4 = DOF*nid_pos[n4]
-        shell.R = R
-        shell.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
-        shell.ley = circ/ny
+        elem = BFSCCylinder(nint)
+        elem.n1 = n1
+        elem.n2 = n2
+        elem.n3 = n3
+        elem.n4 = n4
+        elem.c1 = DOF*nid_pos[n1]
+        elem.c2 = DOF*nid_pos[n2]
+        elem.c3 = DOF*nid_pos[n3]
+        elem.c4 = DOF*nid_pos[n4]
+        elem.R = R
+        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        elem.ley = circ/ny
         for i in range(nint):
             wi = weights[i]
             x1 = ncoords[nid_pos[n1]][0]
@@ -193,38 +193,40 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
             for j in range(nint):
                 wj = weights[j]
                 weight = wi*wj
-                mass += weight*shell.lex*shell.ley/4.*prop.intrho
+                mass += weight*elem.lex*elem.ley/4.*prop.intrho
                 havg += weight/4.*sum(plyts)
 
-                shell.A11[i, j] = prop.A11
-                shell.A12[i, j] = prop.A12
-                shell.A16[i, j] = prop.A16
-                shell.A22[i, j] = prop.A22
-                shell.A26[i, j] = prop.A26
-                shell.A66[i, j] = prop.A66
-                shell.B11[i, j] = prop.B11
-                shell.B12[i, j] = prop.B12
-                shell.B16[i, j] = prop.B16
-                shell.B22[i, j] = prop.B22
-                shell.B26[i, j] = prop.B26
-                shell.B66[i, j] = prop.B66
-                shell.D11[i, j] = prop.D11
-                shell.D12[i, j] = prop.D12
-                shell.D16[i, j] = prop.D16
-                shell.D22[i, j] = prop.D22
-                shell.D26[i, j] = prop.D26
-                shell.D66[i, j] = prop.D66
-        shell.init_k_KC0 = init_k_KC0
-        shell.init_k_KG = init_k_KG
+                elem.A11[i, j] = prop.A11
+                elem.A12[i, j] = prop.A12
+                elem.A16[i, j] = prop.A16
+                elem.A22[i, j] = prop.A22
+                elem.A26[i, j] = prop.A26
+                elem.A66[i, j] = prop.A66
+                elem.B11[i, j] = prop.B11
+                elem.B12[i, j] = prop.B12
+                elem.B16[i, j] = prop.B16
+                elem.B22[i, j] = prop.B22
+                elem.B26[i, j] = prop.B26
+                elem.B66[i, j] = prop.B66
+                elem.D11[i, j] = prop.D11
+                elem.D12[i, j] = prop.D12
+                elem.D16[i, j] = prop.D16
+                elem.D22[i, j] = prop.D22
+                elem.D26[i, j] = prop.D26
+                elem.D66[i, j] = prop.D66
+        elem.init_k_KC0 = init_k_KC0
+        elem.init_k_KG = init_k_KG
         init_k_KC0 += KC0_SPARSE_SIZE
         init_k_KG += KG_SPARSE_SIZE
-        elements.append(shell)
+        elements.append(elem)
+
+    havg /= len(elements)
 
     Kr = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     Kc = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     Kv = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-    for shell in elements:
-        update_KC0(shell, points, weights, Kr, Kc, Kv)
+    for elem in elements:
+        update_KC0(elem, points, weights, Kr, Kc, Kv)
 
     KC0 = coo_matrix((Kv, (Kr, Kc)), shape=(N, N)).tocsc()
 
@@ -277,8 +279,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-    for shell in elements:
-        update_KG(u0, shell, points, weights, KGr, KGc, KGv)
+    for elem in elements:
+        update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
     KGuu = KG[bu, :][:, bu]
 
