@@ -64,13 +64,13 @@ def test_2_runs_in_seq():
     thetadeg_c = 10
     thetadeg_s = 30
 
-    out = koiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
+    out = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, param_f, thetadeg_c, thetadeg_s,
             clamped=True,
             koiter_num_modes=1)
     tmp = out['eigvals']
     print(tmp)
-    out = koiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
+    out = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, param_f, thetadeg_c, thetadeg_s, clamped=True,
             cg_x0=out['cg_x0'],
             lobpcg_X=out['lobpcg_X'],
