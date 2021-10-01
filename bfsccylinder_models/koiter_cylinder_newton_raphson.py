@@ -4,7 +4,7 @@ from collections import defaultdict
 from pypardiso import spsolve
 import numpy as np
 from numpy import isclose, pi
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csc_matrix
 from scipy.sparse.linalg import eigsh, cg, lobpcg, LinearOperator, spilu, bicgstab
 from composites import laminated_plate
 from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
@@ -168,7 +168,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             """
             return np.sqrt((vec*np.abs(1/D))@vec)
 
-        count = 0
+        iteration = 0
         fint = np.zeros(N)
         fint = calc_fint(u0, fint)
         Ri = fint - fext
@@ -190,9 +190,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             crisfield_test = scaling(Ri[bu], D)/max(scaling(fext[bu], D), scaling(fint[bu], D))
             print('#        crisfield_test, max(R)', crisfield_test, np.abs(Ri).max())
             if crisfield_test < epsilon:
-                print('    converged')
+                print('#    converged')
                 break
-            count += 1
+            iteration += 1
             KT = calc_KT(u, KCNLv, KGv)
             KTuu = KT[bu, :][:, bu]
             ui = u.copy()
@@ -265,6 +265,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
+    out['koiter'] = None
 
     if koiter_num_modes == 0:
         return out
@@ -542,7 +543,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually
