@@ -328,12 +328,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     out['t'] = t
     out['s'] = s
     out['c'] = c
+    out['koiter'] = None
+
+    if koiter_num_modes == 0:
+        return out
 
     lambda_a = {}
     for modei in range(koiter_num_modes):
         lambda_a[modei] = eigvals[modei]
 
-    es = partial(np.einsum, optimize='greedy', casting='no')
+    es = partial(np.einsum, optimize='greedy')
 
     #NOTE making the maximum amplitude of the eigenmode equal to h
     #normalizing amplitude of eigenvector according to shell thickness
@@ -372,7 +376,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
-            print(count+1, num_elements)
+            print('#    count', count+1, num_elements)
         c1 = elem.c1
         c2 = elem.c2
         c3 = elem.c3
@@ -636,6 +640,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         for modej in range(koiter_num_modes):
             phi2_ab[(modei, modej)] = left @ ua[modej]
 
+    print()
     a_abc = {}
     for modei in range(koiter_num_modes):
         lambda_i = lambda_a[modei]
@@ -643,6 +648,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
             for modek in range(koiter_num_modes):
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
+                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
+    print()
 
     force2ndorder_ij = {}
     for modei in range(koiter_num_modes):
@@ -693,6 +700,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                                +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]
                                 )
                             )
+                    print('# $b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
+                        modek+1, model+1, b_ijkl[(modei, modej, modek, model)]))
 
     koiter = dict(
         a_ijk=a_abc,

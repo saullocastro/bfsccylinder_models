@@ -523,7 +523,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             for modek in range(koiter_num_modes):
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
-                print('$a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
+                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
     print()
 
     force2ndorder_ij = {}
@@ -575,7 +575,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
                                +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]
                                 )
                             )
-                    print('$b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
+                    print('# $b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
                         modek+1, model+1, b_ijkl[(modei, modej, modek, model)]))
 
     koiter = dict(
