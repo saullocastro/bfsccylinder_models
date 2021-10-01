@@ -1,5 +1,5 @@
 from .linbuck_VAFW import flinBuck_VAFW
-from .koiter_cylinder_CTS import fkoiter_CTS_circum
+from .koiter_cylinder_CTS import fkoiter_cylinder_CTS_circum
 from .koiter_cylinder import fkoiter_cyl_SS3
 
 def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
@@ -65,9 +65,9 @@ def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
             desvars, funcVAT, clamped, cg_x0, lobpcg_X, nint, num_eigvals)
 
 
-def koiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+def koiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
         param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
-        nint=4):
+        nint=4, koiter_num_modes=1):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
     the axial direction (x)
@@ -92,9 +92,9 @@ def koiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, para
         out['eigvecs'] = eigenvectors
 
     """
-    return fkoiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+    return fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
         param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
-        nint=4)
+        nint=4, koiter_num_modes=koiter_num_modes)
 
 
 def koiter_cylinder(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,

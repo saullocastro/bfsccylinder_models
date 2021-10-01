@@ -11,7 +11,7 @@ def test_Sun_et_al():
     #Sun, Y., Tian, K., Li, R., and Wang, B., 2020, “Accelerated Koiter Method for Post-Buckling Analysis of Thin-Walled Shells under Axial Compression,” Thin-Walled Struct., 155, p. 106962.
     L = 0.51 # m
     R = 0.25 # m
-    ny = 4*32
+    ny = 40
 
     nx = int(ny*L/(2*np.pi*R))
     if (nx % 2) == 0:
@@ -48,7 +48,7 @@ def test_Arbocz_Starnes_2002():
     #Arbocz, J., and Starnes, J. H., 2002, “On a High-Fidelity Hierarchical Approach to Buckling Load Calculations,” New Approaches to Structural Mechanics, Shells and Biological Structures, pp. 271–292.
     L = 0.3556 # m
     R = 0.20318603 # m
-    ny = 2*32
+    ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))
     if (nx % 2) == 0:

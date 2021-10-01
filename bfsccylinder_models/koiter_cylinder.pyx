@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 cimport numpy as np
 from numpy import isclose, pi
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csc_matrix
 from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
 from composites import laminated_plate
 from bfsccylinder import BFSCCylinder, update_KC0, update_KG, KC0_SPARSE_SIZE, KG_SPARSE_SIZE
@@ -23,7 +23,7 @@ DOUBLE = np.float64
 cdef cINT DOF = 10
 cdef cINT num_nodes = 4
 
-def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=4,
+def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
         int num_eigvals=2, int koiter_num_modes=1, double load=1000):
 
     cdef int i, j, k, m, n
@@ -43,6 +43,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     cdef np.ndarray[cDOUBLE, ndim=1] u0e, u0
     cdef np.ndarray[cDOUBLE, ndim=2] eia0, eib0, eic0
     cdef np.ndarray[cDOUBLE, ndim=2] eia, eib, eic, kia, kib, kic
+    cdef np.ndarray[cDOUBLE, ndim=2] phi2, phi2e
 
     cdef np.ndarray[cDOUBLE, ndim=2] Nia, Nib, Nic, Mia, Mib
     cdef np.ndarray[cDOUBLE, ndim=2] Nia0, Nib0, Nic0, Mia0, Mib0
@@ -104,30 +105,30 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     print('# starting element assembly')
     havg = prop.h # average shell thickness h
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
-        shell = BFSCCylinder(nint)
-        shell.n1 = n1
-        shell.n2 = n2
-        shell.n3 = n3
-        shell.n4 = n4
-        shell.c1 = DOF*nid_pos[n1]
-        shell.c2 = DOF*nid_pos[n2]
-        shell.c3 = DOF*nid_pos[n3]
-        shell.c4 = DOF*nid_pos[n4]
-        shell.R = R
-        shell.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
-        shell.ley = circ/ny
-        assign_constant_ABD(shell, prop)
-        shell.init_k_KC0 = init_k_KC0
-        shell.init_k_KG = init_k_KG
+        elem = BFSCCylinder(nint)
+        elem.n1 = n1
+        elem.n2 = n2
+        elem.n3 = n3
+        elem.n4 = n4
+        elem.c1 = DOF*nid_pos[n1]
+        elem.c2 = DOF*nid_pos[n2]
+        elem.c3 = DOF*nid_pos[n3]
+        elem.c4 = DOF*nid_pos[n4]
+        elem.R = R
+        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        elem.ley = circ/ny
+        assign_constant_ABD(elem, prop)
+        elem.init_k_KC0 = init_k_KC0
+        elem.init_k_KG = init_k_KG
         init_k_KC0 += KC0_SPARSE_SIZE
         init_k_KG += KG_SPARSE_SIZE
-        elements.append(shell)
+        elements.append(elem)
 
     Kr = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     Kc = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     Kv = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-    for shell in elements:
-        update_KC0(shell, points, weights, Kr, Kc, Kv)
+    for elem in elements:
+        update_KC0(elem, points, weights, Kr, Kc, Kv)
 
     KC0 = coo_matrix((Kv, (Kr, Kc)), shape=(N, N)).tocsc()
 
@@ -139,7 +140,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     checkSS = isclose(x, 0) | isclose(x, L)
     bk[3::DOF] = checkSS
     bk[6::DOF] = checkSS
-    check = isclose(x, L/2)
+    check = isclose(x, L/2.)
     bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
     u0 = np.zeros(N, dtype=DOUBLE)
@@ -181,8 +182,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-    for shell in elements:
-        update_KG(u0, shell, points, weights, KGr, KGc, KGv)
+    for elem in elements:
+        update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
     KGuu = KG[bu, :][:, bu]
 
@@ -242,7 +243,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     for modei in range(koiter_num_modes):
         lambda_a[modei] = eigvals[modei]
 
-    es = partial(np.einsum, optimize='greedy', casting='no')
+    es = partial(np.einsum, optimize='greedy')
 
     #NOTE making the maximum amplitude of the eigenmode equal to h
     #normalizing amplitude of eigenvector according to shell thickness
@@ -264,7 +265,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     phi30e_ab = {}
     phi20e_a = {}
     phi20_a = {}
-    #phi2 = np.zeros((N, N))
+    phi2 = np.zeros((N, N))
     phi200_ab = {}
     for modei in range(koiter_num_modes):
         phi20_a[modei] = np.zeros(N)
@@ -278,7 +279,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
 
     # higher-order tensors for elements
 
+    phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
+    tmp = np.zeros((N, num_nodes*DOF))
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
             print(count+1, num_elements)
@@ -322,7 +325,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
                 phi3e_ab[(modei, modej)] *= 0
                 phi30e_ab[(modei, modej)] *= 0
 
-        phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
+        phi2e *= 0
 
         for i in range(nint):
             xi = points[i]
@@ -339,10 +342,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
 
                 w0_x = 0
                 w0_y = 0
-                for k in range(40):
+                for k in range(num_nodes*DOF):
                     w0_x += elem.Nw_x[k]*u0e[k]
                     w0_y += elem.Nw_y[k]*u0e[k]
-                for k in range(40):
+                for k in range(num_nodes*DOF):
                     eia0[0, k] = w0_x*elem.Nw_x[k]
                     eia0[1, k] = w0_y*elem.Nw_y[k]
                     eia0[2, k] = w0_x*elem.Nw_y[k] + w0_y*elem.Nw_x[k]
@@ -351,7 +354,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
                 for k in range(3):
                     ei0[k] = 0
                     ki0[k] = 0
-                    for m in range(40):
+                    for m in range(num_nodes*DOF):
                         ei0[k] += elem.Bm[k, m]*u0e[m] #NOTE ignoring NL terms
                         ki0[k] += elem.Bb[k, m]*u0e[m]
                     #TODO why lambda_i[0]?
@@ -397,37 +400,33 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
                 Ni[1] = Ni0[1]*lambda_a[0]
                 Ni[2] = Ni0[2]*lambda_a[0]
 
-                Ni00[0] = A11*ej00[0] * A12*ej00[1] + A16*ej00[2]
-                Ni00[1] = A12*ej00[0] * A22*ej00[1] + A26*ej00[2]
-                Ni00[2] = A16*ej00[0] * A26*ej00[1] + A66*ej00[2]
+                Ni00[0] = A11*ej00[0] + A12*ej00[1] + A16*ej00[2]
+                Ni00[1] = A12*ej00[0] + A22*ej00[1] + A26*ej00[2]
+                Ni00[2] = A16*ej00[0] + A26*ej00[1] + A66*ej00[2]
 
                 eia = eib = eic = np.asarray(elem.Bm) #NOTE ignoring NL terms
                 kia = kib = kic = np.asarray(elem.Bb)
 
-                Nia *= 0
-                Mia *= 0
-                Nia0 *= 0
-                Mia0 *= 0
                 for m in range(num_nodes*DOF):
-                    Nia[0, m] += (A11*eia[0, m] + A12*eia[1, m] + A16*eia[2, m]
-                                + B11*kia[0, m] + B12*kia[1, m] + B16*kia[2, m])
-                    Nia[1, m] += (A12*eia[0, m] + A22*eia[1, m] + A26*eia[2, m]
-                                + B12*kia[0, m] + B22*kia[1, m] + B26*kia[2, m])
-                    Nia[2, m] += (A16*eia[0, m] + A26*eia[1, m] + A66*eia[2, m]
-                                + B16*kia[0, m] + B26*kia[1, m] + B66*kia[2, m])
-                    Mia[0, m] += (B11*eia[0, m] + B12*eia[1, m] + B16*eia[2, m]
-                                + D11*kia[0, m] + D12*kia[1, m] + D16*kia[2, m])
-                    Mia[1, m] += (B12*eia[0, m] + B22*eia[1, m] + B26*eia[2, m]
-                                + D12*kia[0, m] + D22*kia[1, m] + D26*kia[2, m])
-                    Mia[2, m] += (B16*eia[0, m] + B26*eia[1, m] + B66*eia[2, m]
-                                + D16*kia[0, m] + D26*kia[1, m] + D66*kia[2, m])
+                    Nia[0, m] = (A11*eia[0, m] + A12*eia[1, m] + A16*eia[2, m]
+                               + B11*kia[0, m] + B12*kia[1, m] + B16*kia[2, m])
+                    Nia[1, m] = (A12*eia[0, m] + A22*eia[1, m] + A26*eia[2, m]
+                               + B12*kia[0, m] + B22*kia[1, m] + B26*kia[2, m])
+                    Nia[2, m] = (A16*eia[0, m] + A26*eia[1, m] + A66*eia[2, m]
+                               + B16*kia[0, m] + B26*kia[1, m] + B66*kia[2, m])
+                    Mia[0, m] = (B11*eia[0, m] + B12*eia[1, m] + B16*eia[2, m]
+                               + D11*kia[0, m] + D12*kia[1, m] + D16*kia[2, m])
+                    Mia[1, m] = (B12*eia[0, m] + B22*eia[1, m] + B26*eia[2, m]
+                               + D12*kia[0, m] + D22*kia[1, m] + D26*kia[2, m])
+                    Mia[2, m] = (B16*eia[0, m] + B26*eia[1, m] + B66*eia[2, m]
+                               + D16*kia[0, m] + D26*kia[1, m] + D66*kia[2, m])
 
-                    Nia0[0, m] += A11*eia0[0, m] + A12*eia0[1, m] + A16*eia0[2, m]
-                    Nia0[1, m] += A12*eia0[0, m] + A22*eia0[1, m] + A26*eia0[2, m]
-                    Nia0[2, m] += A16*eia0[0, m] + A26*eia0[1, m] + A66*eia0[2, m]
-                    Mia0[0, m] += B11*eia0[0, m] + B12*eia0[1, m] + B16*eia0[2, m]
-                    Mia0[1, m] += B12*eia0[0, m] + B22*eia0[1, m] + B26*eia0[2, m]
-                    Mia0[2, m] += B16*eia0[0, m] + B26*eia0[1, m] + B66*eia0[2, m]
+                    Nia0[0, m] = A11*eia0[0, m] + A12*eia0[1, m] + A16*eia0[2, m]
+                    Nia0[1, m] = A12*eia0[0, m] + A22*eia0[1, m] + A26*eia0[2, m]
+                    Nia0[2, m] = A16*eia0[0, m] + A26*eia0[1, m] + A66*eia0[2, m]
+                    Mia0[0, m] = B11*eia0[0, m] + B12*eia0[1, m] + B16*eia0[2, m]
+                    Mia0[1, m] = B12*eia0[0, m] + B22*eia0[1, m] + B26*eia0[2, m]
+                    Mia0[2, m] = B16*eia0[0, m] + B26*eia0[1, m] + B66*eia0[2, m]
                 Nib = Nic = Nia
                 Mib = Mia
 
@@ -443,16 +442,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
                 es('i,j->ij', elem.Nw_y, elem.Nw_x, out=np.asarray(eiab[2]))
                 eicd = eibd = eibc = eiad = eiac = eiab
 
-                Niab[...] = 0
-                Miab[...] = 0
                 for m in range(num_nodes*DOF):
                     for n in range(num_nodes*DOF):
-                        Niab[0, m, n] += A11*eiab[0, m, n] + A12*eiab[1, m, n] + A16*eiab[2, m, n]
-                        Niab[1, m, n] += A12*eiab[0, m, n] + A22*eiab[1, m, n] + A26*eiab[2, m, n]
-                        Niab[2, m, n] += A16*eiab[0, m, n] + A26*eiab[1, m, n] + A66*eiab[2, m, n]
-                        Miab[0, m, n] += B11*eiab[0, m, n] + B12*eiab[1, m, n] + B16*eiab[2, m, n]
-                        Miab[1, m, n] += B12*eiab[0, m, n] + B22*eiab[1, m, n] + B26*eiab[2, m, n]
-                        Miab[2, m, n] += B16*eiab[0, m, n] + B26*eiab[1, m, n] + B66*eiab[2, m, n]
+                        Niab[0, m, n] = A11*eiab[0, m, n] + A12*eiab[1, m, n] + A16*eiab[2, m, n]
+                        Niab[1, m, n] = A12*eiab[0, m, n] + A22*eiab[1, m, n] + A26*eiab[2, m, n]
+                        Niab[2, m, n] = A16*eiab[0, m, n] + A26*eiab[1, m, n] + A66*eiab[2, m, n]
+                        Miab[0, m, n] = B11*eiab[0, m, n] + B12*eiab[1, m, n] + B16*eiab[2, m, n]
+                        Miab[1, m, n] = B12*eiab[0, m, n] + B22*eiab[1, m, n] + B26*eiab[2, m, n]
+                        Miab[2, m, n] = B16*eiab[0, m, n] + B26*eiab[1, m, n] + B66*eiab[2, m, n]
 
                 Niac = Niad = Nibc = Nibd = Nicd = Niab
                 Miac = Miad = Mibc = Miab
@@ -527,16 +524,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
                             for model in range(koiter_num_modes):
                                 phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
 
-        #tmp = np.zeros((N, num_nodes*DOF))
-        #tmp[indices] = phi2e
-        #phi2[:, indices] += tmp
+        tmp *= 0
+        tmp[indices] = phi2e
+        phi2[:, indices] += tmp
         for modei in range(koiter_num_modes):
             phi20_a[modei][indices] += phi20e_a[modei]
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    phi2 = KC0
+    #phi2 = KC0
     phi2uu = phi2[bu, :][:, bu]
 
     phi2_ab = {}
@@ -551,7 +548,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
         lambda_i = lambda_a[modei]
         for modej in range(koiter_num_modes):
             for modek in range(koiter_num_modes):
-                a_ijk = -1/(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
+                a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
                 print('$a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
     print()
@@ -573,7 +570,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, bc, cg_x0=None, lobpcg_X=None, int nint=
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually

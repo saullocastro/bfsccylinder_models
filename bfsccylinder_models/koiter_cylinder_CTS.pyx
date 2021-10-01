@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 cimport numpy as np
 from numpy import isclose, pi
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csc_matrix
 from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
 from composites import laminated_plate
 from bfsccylinder import BFSCCylinder, update_KC0, update_KG, KC0_SPARSE_SIZE, KG_SPARSE_SIZE
@@ -22,7 +22,7 @@ DOUBLE = np.float64
 cdef cINT DOF = 10
 cdef cINT num_nodes = 4
 
-def fkoiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
+def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
         param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
         int nint=4, int num_eigvals=2, int koiter_num_modes=1):
 
@@ -661,7 +661,7 @@ def fkoiter_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, par
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually
