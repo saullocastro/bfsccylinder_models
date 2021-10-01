@@ -1,5 +1,5 @@
 from .linbuck_VAFW import flinBuck_VAFW
-from .koiter_CTS import fkoiter_CTS_circum
+from .koiter_cylinder_CTS import fkoiter_CTS_circum
 from .koiter_cylinder import fkoiter_cyl_SS3
 
 def linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick, desvars,
