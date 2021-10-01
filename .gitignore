@@ -1,6 +1,9 @@
 version.py
 # Build related
 models_core.cpp 
+linbuck_VAFW.cpp 
+koiter_cylinder.cpp 
+koiter_cylinder_CTS.cpp 
 build
 dist
 .coverage

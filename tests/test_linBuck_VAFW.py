@@ -35,6 +35,7 @@ def test_2_runs_in_seq():
     out = linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick,
             desvars, func_VAT_P_x, clamped=True, cg_x0=out['cg_x0'],
             lobpcg_X=out['lobpcg_X'])
+    print(out)
 
 def test_Z33():
     L = 0.510 # m
