@@ -16,7 +16,7 @@ from bfsccylinder.utils import assign_constant_ABD
 num_nodes = 4
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
-        num_eigvals=2, koiter_num_modes=1, load=1000):
+        num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
 
     # geometry our FW cylinders
     circ = 2*pi*R # m
@@ -87,7 +87,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
     KC0v = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
     for elem in elements:
         update_KC0(elem, points, weights, KC0r, KC0c, KC0v)
-    KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsr()
+    KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsc()
 
     print('# finished element assembly')
 
@@ -136,7 +136,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
 
     u0[bu] = uu
 
-    NLprebuck = True
     if NLprebuck:
         print('#    initiating nonlinear pre-buckling state')
         KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
@@ -149,8 +148,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             for elem in elements:
                 update_KCNL(u, elem, points, weights, KCNLr, KCNLc, KCNLv)
                 update_KG(u, elem, points, weights, KGr, KGc, KGv)
-            KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsr()
-            KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsr()
+            KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+            KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
             return KC0 + KCNL + KG
 
         def calc_fint(u, fint):
@@ -180,7 +179,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
         KTuu = KT[bu, :][:, bu]
         D = KC0uu.diagonal() # at beginning of load increment
         while True:
-            print('#    count', count)
+            print('#    iteration', iteration)
             duu = spsolve(KTuu, -Ri[bu])
             #PREC = 1./KTuu.diagonal().max()
             #duu, info = cg(PREC*KTuu, PREC*(-Ri[bu]), atol=1e-9)
@@ -189,7 +188,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             fint = calc_fint(u, fint)
             Ri = fint - fext
             crisfield_test = scaling(Ri[bu], D)/max(scaling(fext[bu], D), scaling(fint[bu], D))
-            print('#        crisfield_test', crisfield_test, np.abs(Ri).max())
+            print('#        crisfield_test, max(R)', crisfield_test, np.abs(Ri).max())
             if crisfield_test < epsilon:
                 print('    converged')
                 break
@@ -199,19 +198,24 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
             ui = u.copy()
         u0 = u.copy()
 
-    print('# finished static analysis')
 
-    KCNLv *= 0
-    for elem in elements:
-        update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
-    KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsr()
-    KC = KC0 + KCNL
-    KCuu = KC[bu, :][:, bu]
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    else:
+        KC = KC0
+        KCuu = KC0uu
+
+    print('# finished static analysis')
 
     KGv *= 0
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
-    KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsr()
+    KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
     KGuu = KG[bu, :][:, bu]
 
     # A * x[i] = lambda[i] * M * x[i]
