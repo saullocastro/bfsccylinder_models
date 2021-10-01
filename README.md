@@ -6,8 +6,7 @@ Github Actions status:
 
 Coverage status:
 
-[![Coverage Status](https://coveralls.io/repos/github/saullocastro/bfsccylinder_models/badge.svg?branch=master)](https://coveralls.io/github/saullocastro/bfsccylinder_models?branch=master)
-
+[![codecov](https://codecov.io/gh/saullocastro/bfsccylinder_models/branch/master/graph/badge.svg?token=WHOOZ3V35L)](https://codecov.io/gh/saullocastro/bfsccylinder_models)
 
 License
 -------
