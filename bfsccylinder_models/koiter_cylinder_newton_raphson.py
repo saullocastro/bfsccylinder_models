@@ -305,6 +305,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
 
     # higher-order tensors for elements
 
+    u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
     Aij = prop.ABD[:3, :3]
     Bij = prop.ABD[:3, 3:]
     Dij = prop.ABD[3:, 3:]
@@ -320,7 +321,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
         c3 = elem.c3
         c4 = elem.c4
 
-        u0e = np.zeros(4*DOF, dtype=np.float64)
+        u0e *= 0
         for i in range(DOF):
             u0e[0*DOF + i] = u0[c1 + i]
             u0e[1*DOF + i] = u0[c2 + i]
@@ -329,7 +330,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
 
         uae = {}
         for modei in range(koiter_num_modes):
-            uae[modei] = np.zeros(4*DOF, dtype=np.float64)
+            uae[modei] = np.zeros(num_nodes*DOF, dtype=np.float64)
             for i in range(DOF):
                 uae[modei][0*DOF + i] = ua[modei][c1 + i]
                 uae[modei][1*DOF + i] = ua[modei][c2 + i]
