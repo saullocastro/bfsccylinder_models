@@ -14,7 +14,7 @@ def test_pm45():
     L = 0.3 # m
     R = 0.136/2 # m
 
-    ny = 40
+    ny = 20
 
     E11 = 90e9
     E22 = 7e9
@@ -29,16 +29,16 @@ def test_pm45():
     param_n = 0
     param_f = 0
     thetadeg_c = 45
-    thetadeg_s = 50
+    thetadeg_s = 60
 
     load = 1000
     NLprebuck = False
-    out = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
+    out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, param_f, thetadeg_c, thetadeg_s,
-            num_eigvals=2, koiter_num_modes=1, load=load,
+            num_eigvals=2, koiter_num_modes=2, load=load,
             NLprebuck=NLprebuck)
-    print('cylinder_CTS eigvals', out['eigvals'])
-    print('cylinder_CTS koiter', out['koiter'])
+    print('cylinder_CTS eigvals', out1['eigvals'])
+    print('cylinder_CTS koiter', out1['koiter'])
 
     nx = int(ny*L/(2*np.pi*R))
     if nx % 2 == 0:
@@ -47,12 +47,28 @@ def test_pm45():
     plyt = tow_thick
     stack = [45, -45]
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt,
-            offset=plyt)
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None,
-            num_eigvals=2, koiter_num_modes=1, load=load, NLprebuck=NLprebuck)
+            offset=plyt, rho=rho)
+    out2 = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, num_eigvals=2,
+            koiter_num_modes=2, load=load, NLprebuck=NLprebuck)
 
-    print('fkoiter_cyl_SS3 eigvals', out['eigvals'])
-    print('fkoiter_cyl_SS3 koiter', out['koiter'])
+    print('fkoiter_cyl_SS3 eigvals', out2['eigvals'])
+    print('fkoiter_cyl_SS3 koiter', out2['koiter'])
+
+    assert np.allclose(out1['eigvals'], out2['eigvals'])
+    assert np.isclose(out1['volume'], out2['volume'])
+    assert np.isclose(out1['mass'], out2['mass'])
+
+    for k in out1['koiter']['a_ijk'].keys():
+        assert np.isclose(out1['koiter']['a_ijk'][k],
+                          out2['koiter']['a_ijk'][k],
+                          atol=1e-5)
+    assert np.isclose(out1['koiter']['b_ijkl'][(0, 0, 0, 0)],
+                      out2['koiter']['b_ijkl'][(0, 0, 0, 0)],
+                      rtol=0.05)
+    #TODO mixed modes are not correct
+    assert np.isclose(out1['koiter']['b_ijkl'][(1, 1, 1, 1)],
+                      out2['koiter']['b_ijkl'][(1, 1, 1, 1)],
+                      rtol=0.05)
 
 if __name__ == '__main__':
     test_pm45()
