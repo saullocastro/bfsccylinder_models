@@ -19,10 +19,11 @@ from bfsccylinder.quadrature import get_points_weights
 num_nodes = 4
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
-        param_f, thetadeg_c, thetadeg_s, cg_x0=None,
+        param_f, thetadeg_c, thetadeg_s, cg_x0=None, mesh_only=False,
         nint=4, num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
 
     circ = 2*pi*R
+    out = {}
 
     if param_n == 0 or param_f == 0:
         print('# constant stiffness case')
@@ -94,6 +95,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     ncoords = np.vstack((xmesh.flatten(), ymesh.flatten())).T
     x = ncoords[:, 0]
     y = ncoords[:, 1]
+    out['ncoords'] = ncoords
+    out['x'] = x
+    out['y'] = y
+    if mesh_only:
+        return out
 
     i = nids_mesh.shape[0] - 1
     j = nids_mesh.shape[1] - 1
@@ -323,7 +329,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     print('# eigvals', load_mult)
     print('# critical buckling load', Pcr)
 
-    out = {}
+    out['P0'] = load
     out['Pcr'] = Pcr
     out['volume'] = volume
     out['mass'] = mass
