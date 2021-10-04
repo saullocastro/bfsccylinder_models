@@ -10,7 +10,8 @@ Coverage status:
 
 License
 -------
-Distrubuted in the 2-Clause BSD license (https://raw.github.com/saullocastro/bfsccylinder_models/master/LICENSE).
+Distrubuted under the 3-Clause BSD license
+(https://raw.github.com/saullocastro/bfsccylinder_models/master/LICENSE).
 
 Contact: S.G.P.Castro@tudelft.nl
 
