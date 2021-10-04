@@ -23,7 +23,7 @@ def test_Sun_et_al():
     thickness = 0.0005
     prop = isotropic_plate(E=E, nu=nu, thickness=thickness)
 
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         num_eigvals=2, koiter_num_modes=1)
     print(out['eigvals'])
 
@@ -39,9 +39,8 @@ def test_Sun_et_al():
     stack = (+45, -45, 0, 90, 90, 0 -45, +45)
     plyt = 0.00101539/len(stack)
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt)
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None,
-            lobpcg_X=None, nint=4, num_eigvals=2,
-            koiter_num_modes=1)
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+            num_eigvals=2, koiter_num_modes=1)
     print(out['eigvals'])
 
 def test_Arbocz_Starnes_2002():
@@ -65,9 +64,8 @@ def test_Arbocz_Starnes_2002():
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt)
     load = 50000. # N
     #load = 183366/1.5 # N
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None,
-            lobpcg_X=None, nint=4, num_eigvals=2,
-            koiter_num_modes=1, load=load, NLprebuck=True)
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+            num_eigvals=2, koiter_num_modes=1, load=load, NLprebuck=True)
     ref = 391.990772951375*1000 # N/m
     ans = out['eigvals']*load/2/np.pi/R/ref
     print(ans)
