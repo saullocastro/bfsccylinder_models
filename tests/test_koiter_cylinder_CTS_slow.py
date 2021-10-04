@@ -46,7 +46,8 @@ def test_pm45():
     laminaprop = (E11, E22, nu12, G12, G12, G12)
     plyt = tow_thick
     stack = [45, -45]
-    prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt)
+    prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt,
+            offset=plyt)
     out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None,
             num_eigvals=2, koiter_num_modes=1, load=load, NLprebuck=NLprebuck)
 

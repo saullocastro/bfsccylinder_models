@@ -128,8 +128,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         elem.c3 = DOF*nid_pos[n3]
         elem.c4 = DOF*nid_pos[n4]
         elem.R = R
-        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        elem.lex = x[nid_pos[n2]] - x[nid_pos[n1]]
         elem.ley = circ/ny
+        assert np.isclose(L/(nx-1), x[nid_pos[n2]] - x[nid_pos[n1]])
         for i in range(nint):
             wi = weights[i]
             x1 = ncoords[nid_pos[n1]][0]
@@ -181,6 +182,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         elements.append(elem)
 
     havg /= len(elements)
+    print('havg', havg)
 
     KC0r = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     KC0c = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)

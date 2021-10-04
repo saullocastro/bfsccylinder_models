@@ -22,7 +22,6 @@ num_nodes = 4
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
         num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
 
-    # geometry our FW cylinders
     circ = 2*pi*R # m
 
     nids = 1 + np.arange(nx*(ny+1))
@@ -64,6 +63,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
     init_k_KG = 0
     print('# starting element assembly')
     havg = prop.h # average shell thickness h
+    print('havg', havg)
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
         elem = BFSCCylinder(nint)
         elem.n1 = n1
@@ -75,8 +75,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, nint=4,
         elem.c3 = DOF*nid_pos[n3]
         elem.c4 = DOF*nid_pos[n4]
         elem.R = R
-        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        elem.lex = x[nid_pos[n2]] - x[nid_pos[n1]]
         elem.ley = circ/ny
+        assert np.isclose(L/(nx-1), x[nid_pos[n2]] - x[nid_pos[n1]])
         assign_constant_ABD(elem, prop)
         elem.init_k_KC0 = init_k_KC0
         elem.init_k_KCNL = init_k_KCNL
