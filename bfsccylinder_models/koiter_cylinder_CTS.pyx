@@ -24,9 +24,9 @@ cdef cINT DOF = 10
 cdef cINT num_nodes = 4
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
-        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, mesh_only=False,
-        clamped=True, cg_x0=None, lobpcg_X=None, int nint=4, int num_eigvals=2,
-        int koiter_num_modes=1):
+        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, idealistic_CTS=False,
+        mesh_only=False, clamped=True, cg_x0=None, lobpcg_X=None, int nint=4,
+        int num_eigvals=2, int koiter_num_modes=1):
 
 
     cdef int i, j, k, m, n
@@ -71,6 +71,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     circ = 2*np.pi*R
     out = {}
 
+    assert thetadeg_c >= 0
+
     if param_n == 0 or param_f == 0:
         print('# constant stiffness case')
         assert ny is not None
@@ -84,7 +86,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         s = None
 
     else:
-        assert abs(thetadeg_s) > abs(thetadeg_c), 'thetadeg_s must be larger than thetadeg_c'
+        assert thetadeg_s > thetadeg_c, 'thetadeg_s must be larger than thetadeg_c'
         t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
         nmax = L/(2*t)
         print('# nmax', nmax)
@@ -200,7 +202,18 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             xlocal = x1 + (x2 - x1)*(xi + 1)/2.
             assert xlocal > x1 and xlocal < x2
             theta_local = np.interp(xlocal, xlin, thetalin)
-            steering_angle = theta_local - thetadeg_c
+            if idealistic_CTS:
+                # Lincoln, R. L., Weaver, P. M., Pirrera, A., and Groh, R. M.
+                # J., 2021, “Imperfection-Insensitive Continuous Tow-Sheared
+                # Cylinders,” Compos. Struct., 260, p. 113445.
+                #NOTE in the idealistic_CTS, there is thickness increase only
+                #     when the steering occurs out of a reference angle
+                steering_angle = theta_local - thetadeg_c
+            else:
+                #NOTE in the real CTS, there is thickness increase for any
+                #     angle other than 0, given that the shift direction is the
+                #     circumferential direction
+                steering_angle = theta_local
             plyt_local = h_tow / np.cos(np.deg2rad(steering_angle))
 
             # forcing balanced laminates
