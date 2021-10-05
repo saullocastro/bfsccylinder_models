@@ -35,7 +35,7 @@ def test_pm45():
     NLprebuck = False
     out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, param_f, thetadeg_c, thetadeg_s,
-            num_eigvals=2, koiter_num_modes=2, load=load,
+            num_eigvals=2, koiter_num_modes=2, load=load, idealistic_CTS=True,
             NLprebuck=NLprebuck)
     print('cylinder_CTS eigvals', out1['eigvals'])
     print('cylinder_CTS koiter', out1['koiter'])
