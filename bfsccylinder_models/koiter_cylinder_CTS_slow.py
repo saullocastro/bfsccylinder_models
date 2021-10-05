@@ -67,7 +67,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         thetalin = np.ones(nxc-1)*thetadeg_c
         for i in range(param_n):
             start = c + i*(c + 2*t + s)
-            print('DEBUG start', start)
             xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
             thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
             if not isclose(s, 0):
@@ -358,6 +357,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
+    out['t'] = t
+    out['s'] = s
+    out['c'] = c
     out['koiter'] = None
 
     if koiter_num_modes == 0:
@@ -406,9 +408,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     # higher-order tensors for elements
 
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
-    Aij = prop.ABD[:3, :3]
-    Bij = prop.ABD[:3, 3:]
-    Dij = prop.ABD[3:, 3:]
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
             print('#    count', count+1, num_elements)
@@ -462,6 +461,19 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             xi = points[i]
             weight_xi = weights[i]
             for j in range(nint):
+                #TODO use Cython later
+                Aij = np.array([
+                    [elem.A11[i, j], elem.A12[i, j], elem.A16[i, j]],
+                    [elem.A12[i, j], elem.A22[i, j], elem.A26[i, j]],
+                    [elem.A16[i, j], elem.A26[i, j], elem.A66[i, j]]])
+                Bij = np.array([
+                    [elem.B11[i, j], elem.B12[i, j], elem.B16[i, j]],
+                    [elem.B12[i, j], elem.B22[i, j], elem.B26[i, j]],
+                    [elem.B16[i, j], elem.B26[i, j], elem.B66[i, j]]])
+                Dij = np.array([
+                    [elem.D11[i, j], elem.D12[i, j], elem.D16[i, j]],
+                    [elem.D12[i, j], elem.D22[i, j], elem.D26[i, j]],
+                    [elem.D16[i, j], elem.D26[i, j], elem.D66[i, j]]])
                 eta = points[j]
                 weight_eta = weights[j]
                 weight = weight_xi * weight_eta
