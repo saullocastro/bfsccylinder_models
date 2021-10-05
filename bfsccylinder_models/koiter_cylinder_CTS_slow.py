@@ -59,15 +59,18 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         dx = t/(nxt-1)
         if ny is None:
             ny = int(round(circ/dx, 0))
-        nxc = max(1, int(round(c/t*nxt, 0)))
-        nxs = max(1, int(round(s/t*nxt, 0)))
+        nxc = max(2, int(round(c/t*nxt, 0)))
+        nxs = max(2, int(round(s/t*nxt, 0)))
+        print('# nxc', nxc)
+        print('# nxs', nxs)
         xlin = np.linspace(0, c, nxc-1, endpoint=False)
         thetalin = np.ones(nxc-1)*thetadeg_c
         for i in range(param_n):
-            start = c + i*(c+2*t+s)
+            start = c + i*(c + 2*t + s)
+            print('DEBUG start', start)
             xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
             thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
-            if nxs > 1:
+            if not isclose(s, 0):
                 xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
                 thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
             xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
