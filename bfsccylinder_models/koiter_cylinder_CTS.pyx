@@ -12,7 +12,8 @@ from numpy import isclose, pi
 from scipy.sparse import coo_matrix, csc_matrix
 from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
 from composites import laminated_plate
-from bfsccylinder import BFSCCylinder, update_KC0, update_KG, KC0_SPARSE_SIZE, KG_SPARSE_SIZE
+from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
+        KC0_SPARSE_SIZE, KCNL_SPARSE_SIZE, KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
 
 ctypedef np.int64_t cINT
@@ -22,9 +23,10 @@ DOUBLE = np.float64
 cdef cINT DOF = 10
 cdef cINT num_nodes = 4
 
-def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
-        param_f, thetadeg_c, thetadeg_s, clamped=True, cg_x0=None, lobpcg_X=None,
-        int nint=4, int num_eigvals=2, int koiter_num_modes=1):
+def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
+        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, mesh_only=False,
+        clamped=True, cg_x0=None, lobpcg_X=None, int nint=4, int num_eigvals=2,
+        int koiter_num_modes=1):
 
 
     cdef int i, j, k, m, n
@@ -66,9 +68,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     Niab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
     Miab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
 
-    circ = 2*pi*R # [m]
+    circ = 2*np.pi*R
+    out = {}
 
     if param_n == 0 or param_f == 0:
+        print('# constant stiffness case')
         assert ny is not None
         nx = int(ny*L/circ)
         if nx % 2 == 0:
@@ -83,29 +87,34 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         assert abs(thetadeg_s) > abs(thetadeg_c), 'thetadeg_s must be larger than thetadeg_c'
         t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
         nmax = L/(2*t)
-        print('nmax', nmax)
+        print('# nmax', nmax)
         assert param_n <= nmax
         cmax = (L - 2*t*param_n)/(param_n+1)
-        if not np.isclose(cmax, 0):
+        if not isclose(cmax, 0):
             s = param_f/(param_n*(param_f + 1))*(L - 2*t*param_n)
             c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
         else:
             s = 0
             c = 0
-        assert np.isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+        assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+        print('# param_t', t)
+        print('# param_s', s)
+        print('# param_c', c)
 
         dx = t/(nxt-1)
         if ny is None:
             ny = int(round(circ/dx, 0))
-        nxc = max(1, int(round(c/t*nxt, 0)))
-        nxs = max(1, int(round(s/t*nxt, 0)))
+        nxc = max(2, int(round(c/t*nxt, 0)))
+        nxs = max(2, int(round(s/t*nxt, 0)))
+        print('# nxc', nxc)
+        print('# nxs', nxs)
         xlin = np.linspace(0, c, nxc-1, endpoint=False)
         thetalin = np.ones(nxc-1)*thetadeg_c
         for i in range(param_n):
-            start = c + i*(c+2*t+s)
+            start = c + i*(c + 2*t + s)
             xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
             thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
-            if nxs > 1:
+            if not isclose(s, 0):
                 xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
                 thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
             xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
@@ -126,6 +135,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     nids_mesh[:, nids_mesh.shape[1]-1] = nids_mesh[:, 0]
     nids = np.unique(nids_mesh)
     nid_pos = dict(zip(nids, np.arange(len(nids))))
+    out['nid_pos'] = nid_pos
 
     ytmp = np.linspace(0, circ, ny+1)
     ylin = np.linspace(0, circ-(ytmp[ytmp.shape[0]-1] - ytmp[ytmp.shape[0]-2]), ny)
@@ -134,9 +144,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     ymesh = ymesh.T
 
     # getting nodes
-    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten())).T
+    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten(), np.zeros_like(xmesh.flatten()))).T
     x = ncoords[:, 0]
     y = ncoords[:, 1]
+    out['ncoords'] = ncoords
+    out['x'] = x
+    out['y'] = y
 
     i = nids_mesh.shape[0] - 1
     j = nids_mesh.shape[1] - 1
@@ -148,17 +161,22 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     points, weights = get_points_weights(nint=nint)
 
     num_elements = len(n1s)
-    print('# number of elements,', num_elements)
+    print('# nx', nx)
+    print('# ny', ny)
+    print('# number of elements', num_elements)
 
     elements = []
     N = DOF*nx*ny
-    print('# number of DOF,', N)
+    print('# numbers of DOF', N)
     laminaprop = (E11, E22, nu12, G12, G12, G12)
     init_k_KC0 = 0
+    init_k_KCNL = 0
     init_k_KG = 0
     print('# starting element assembly')
+    volume = 0
     mass = 0
-    havg = 0 # average shell thickness h
+    thetadegavg_elements = []
+    havg_elements = []
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
         elem = BFSCCylinder(nint)
         elem.n1 = n1
@@ -170,21 +188,22 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         elem.c3 = DOF*nid_pos[n3]
         elem.c4 = DOF*nid_pos[n4]
         elem.R = R
-        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        x1 = x[nid_pos[n1]]
+        x2 = x[nid_pos[n2]]
+        elem.lex = x2 - x1
         elem.ley = circ/ny
+        havg_elem = 0
+        thetadegavg_elem = 0
         for i in range(nint):
             wi = weights[i]
-            x1 = ncoords[nid_pos[n1]][0]
-            x2 = ncoords[nid_pos[n2]][0]
             xi = points[i]
             xlocal = x1 + (x2 - x1)*(xi + 1)/2.
             assert xlocal > x1 and xlocal < x2
-
             theta_local = np.interp(xlocal, xlin, thetalin)
             steering_angle = theta_local - thetadeg_c
             plyt_local = h_tow / np.cos(np.deg2rad(steering_angle))
 
-            #balanced laminate
+            # forcing balanced laminates
             stack = (theta_local, -theta_local)
             plyts = (plyt_local, plyt_local)
 
@@ -193,8 +212,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
             for j in range(nint):
                 wj = weights[j]
                 weight = wi*wj
+                volume += weight*elem.lex*elem.ley/4.*prop.h
                 mass += weight*elem.lex*elem.ley/4.*prop.intrho
-                havg += weight/4.*sum(plyts)
+                havg_elem += weight/4.*sum(plyts)
+                thetadegavg_elem += weight/4.*theta_local
 
                 elem.A11[i, j] = prop.A11
                 elem.A12[i, j] = prop.A12
@@ -214,21 +235,34 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 elem.D22[i, j] = prop.D22
                 elem.D26[i, j] = prop.D26
                 elem.D66[i, j] = prop.D66
+        havg_elements.append(havg_elem)
+        thetadegavg_elements.append(thetadegavg_elem)
         elem.init_k_KC0 = init_k_KC0
+        elem.init_k_KCNL = init_k_KCNL
         elem.init_k_KG = init_k_KG
         init_k_KC0 += KC0_SPARSE_SIZE
+        init_k_KCNL += KCNL_SPARSE_SIZE
         init_k_KG += KG_SPARSE_SIZE
         elements.append(elem)
 
-    havg /= len(elements)
+    havg_elements = np.asarray(havg_elements)
+    havg = havg_elements.mean()
+    out['volume'] = volume
+    out['mass'] = mass
+    out['thetadegavg_elements'] = thetadegavg_elements
+    out['havg_elements'] = havg_elements
+    out['havg'] = havg
+    out['elements'] = elements
 
-    Kr = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
-    Kc = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
-    Kv = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+    if mesh_only:
+        return out
+
+    KC0r = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
+    KC0c = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
+    KC0v = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
     for elem in elements:
-        update_KC0(elem, points, weights, Kr, Kc, Kv)
-
-    KC0 = coo_matrix((Kv, (Kr, Kc)), shape=(N, N)).tocsc()
+        update_KC0(elem, points, weights, KC0r, KC0c, KC0v)
+    KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsc()
 
     print('# finished element assembly')
 
@@ -324,17 +358,14 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     Pcr = load_mult[0]*(force[0::DOF][checkTopEdge]).sum()
     print('# critical buckling load', Pcr)
 
-    out = {}
+    out['P0'] = Pcr/load_mult[0]
     out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
     out['lobpcg_X'] = Xu
-    out['mass'] = mass
+    out['eigvals'] = load_mult
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
-    out['eigvals'] = eigvals
     out['eigvecs'] = eigvecs
-    out['xlin'] = xlin
-    out['thetalin'] = thetalin
     out['t'] = t
     out['s'] = s
     out['c'] = c
@@ -347,14 +378,14 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     for modei in range(koiter_num_modes):
         lambda_a[modei] = eigvals[modei]
 
-    es = partial(np.einsum, optimize='greedy')
+    es = partial(np.einsum, optimize='greedy', casting='no')
 
     #NOTE making the maximum amplitude of the eigenmode equal to h
     #normalizing amplitude of eigenvector according to shell thickness
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        if np.isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
+        if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
             ua[modei] /= abs(ua[modei][6::DOF].max())
         elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
             ua[modei] /= ua[modei][6::DOF].max()
@@ -641,7 +672,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    #phi2 = KC0
     phi2uu = phi2[bu, :][:, bu]
 
     phi2_ab = {}
@@ -650,7 +680,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         for modej in range(koiter_num_modes):
             phi2_ab[(modei, modej)] = left @ ua[modej]
 
-    print()
+    print('# a_ijk factors')
     a_abc = {}
     for modei in range(koiter_num_modes):
         lambda_i = lambda_a[modei]
@@ -659,8 +689,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
                 print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
-    print()
-
     force2ndorder_ij = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
@@ -687,8 +715,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 ui = ua[modek]
                 uab[(modei, modej)] -= ui*np.dot(uijbar, ui)/np.dot(ui, ui)
 
+    print('# b_ijkl factors')
     b_ijkl = {}
-
     for modei in range(koiter_num_modes):
         phi20_i = phi20_a[modei]
         lambda_i = lambda_a[modei]
