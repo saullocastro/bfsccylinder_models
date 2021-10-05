@@ -7,7 +7,7 @@ except:
     from scipy.sparse.linalg import spsolve
 
 import numpy as np
-from numpy import isclose, pi
+from numpy import isclose
 from scipy.sparse import coo_matrix, csc_matrix
 from scipy.sparse.linalg import eigsh
 from composites import laminated_plate
@@ -18,11 +18,12 @@ from bfsccylinder.quadrature import get_points_weights
 
 num_nodes = 4
 
-def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h_tow, param_n,
-        param_f, thetadeg_c, thetadeg_s, cg_x0=None, mesh_only=False,
-        nint=4, num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
+def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
+        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, cg_x0=None,
+        mesh_only=False, nint=4, num_eigvals=2, koiter_num_modes=1, load=1000,
+        NLprebuck=False):
 
-    circ = 2*pi*R
+    circ = 2*np.pi*R
     out = {}
 
     if param_n == 0 or param_f == 0:
@@ -44,13 +45,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         print('# nmax', nmax)
         assert param_n <= nmax
         cmax = (L - 2*t*param_n)/(param_n+1)
-        if not np.isclose(cmax, 0):
+        if not isclose(cmax, 0):
             s = param_f/(param_n*(param_f + 1))*(L - 2*t*param_n)
             c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
         else:
             s = 0
             c = 0
-        assert np.isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+        assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+        print('# param_t', t)
+        print('# param_s', s)
+        print('# param_c', c)
 
         dx = t/(nxt-1)
         if ny is None:
@@ -84,6 +88,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     nids_mesh[:, nids_mesh.shape[1]-1] = nids_mesh[:, 0]
     nids = np.unique(nids_mesh)
     nid_pos = dict(zip(nids, np.arange(len(nids))))
+    out['nid_pos'] = nid_pos
 
     ytmp = np.linspace(0, circ, ny+1)
     ylin = np.linspace(0, circ-(ytmp[ytmp.shape[0]-1] - ytmp[ytmp.shape[0]-2]), ny)
@@ -92,14 +97,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     ymesh = ymesh.T
 
     # getting nodes
-    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten())).T
+    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten(), np.zeros_like(xmesh.flatten()))).T
     x = ncoords[:, 0]
     y = ncoords[:, 1]
     out['ncoords'] = ncoords
     out['x'] = x
     out['y'] = y
-    if mesh_only:
-        return out
 
     i = nids_mesh.shape[0] - 1
     j = nids_mesh.shape[1] - 1
@@ -125,7 +128,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     print('# starting element assembly')
     volume = 0
     mass = 0
-    havg = 0 # average shell thickness h
+    thetadegavg_elements = []
+    havg_elements = []
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
         elem = BFSCCylinder(nint)
         elem.n1 = n1
@@ -141,6 +145,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         x2 = x[nid_pos[n2]]
         elem.lex = x2 - x1
         elem.ley = circ/ny
+        havg_elem = 0
+        thetadegavg_elem = 0
         for i in range(nint):
             wi = weights[i]
             xi = points[i]
@@ -161,7 +167,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 weight = wi*wj
                 volume += weight*elem.lex*elem.ley/4.*prop.h
                 mass += weight*elem.lex*elem.ley/4.*prop.intrho
-                havg += weight/4.*sum(plyts)
+                havg_elem += weight/4.*sum(plyts)
+                thetadegavg_elem += weight/4.*theta_local
 
                 elem.A11[i, j] = prop.A11
                 elem.A12[i, j] = prop.A12
@@ -181,6 +188,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
                 elem.D22[i, j] = prop.D22
                 elem.D26[i, j] = prop.D26
                 elem.D66[i, j] = prop.D66
+        havg_elements.append(havg_elem)
+        thetadegavg_elements.append(thetadegavg_elem)
         elem.init_k_KC0 = init_k_KC0
         elem.init_k_KCNL = init_k_KCNL
         elem.init_k_KG = init_k_KG
@@ -189,7 +198,17 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
         init_k_KG += KG_SPARSE_SIZE
         elements.append(elem)
 
-    havg /= len(elements)
+    havg_elements = np.asarray(havg_elements)
+    havg = havg_elements.mean()
+    out['volume'] = volume
+    out['mass'] = mass
+    out['thetadegavg_elements'] = thetadegavg_elements
+    out['havg_elements'] = havg_elements
+    out['havg'] = havg
+    out['elements'] = elements
+
+    if mesh_only:
+        return out
 
     KC0r = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     KC0c = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
@@ -219,9 +238,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     checkBottomEdge = isclose(x, 0)
     fext = np.zeros(N)
     fext[0::DOF][checkBottomEdge] = +load/ny
-    assert np.isclose(fext.sum(), load)
+    assert isclose(fext.sum(), load)
     fext[0::DOF][checkTopEdge] = -load/ny
-    assert np.isclose(fext.sum(), 0)
+    assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
     KC0uu = KC0[bu, :][:, bu]
@@ -331,9 +350,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
 
     out['P0'] = load
     out['Pcr'] = Pcr
-    out['volume'] = volume
-    out['mass'] = mass
-    out['havg'] = havg
     out['cg_x0'] = cg_x0
     out['eigvals'] = load_mult
     eigvecs = np.zeros((N, num_eigvals))
@@ -357,7 +373,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho, h
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        if np.isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
+        if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
             ua[modei] /= abs(ua[modei][6::DOF].max())
         elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
             ua[modei] /= ua[modei][6::DOF].max()
