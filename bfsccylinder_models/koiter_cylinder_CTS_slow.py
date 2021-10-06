@@ -19,7 +19,8 @@ from bfsccylinder.quadrature import get_points_weights
 num_nodes = 4
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
-        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, cg_x0=None,
+        h_tow, param_n, param_f, thetadeg_c, thetadeg_s,
+        ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, load=1000, NLprebuck=False):
 
@@ -31,7 +32,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     if param_n == 0 or param_f == 0:
         print('# constant stiffness case')
         assert ny is not None
-        nx = int(ny*L/circ)
+        nx = int(ny*L/circ/ny_nx_aspect_ratio)
         if nx % 2 == 0:
             nx += 1
         xlin = np.linspace(0, L, nx)
@@ -60,7 +61,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
         dx = t/(nxt-1)
         if ny is None:
-            ny = int(round(circ/dx, 0))
+            ny = int(round(circ/dx*ny_nx_aspect_ratio, 0))
         nxc = max(2, int(round(c/t*nxt, 0)))
         nxs = max(2, int(round(s/t*nxt, 0)))
         print('# nxc', nxc)
@@ -72,8 +73,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
             thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
             if not isclose(s, 0):
-                xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
-                thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
+                #NOTE to keep always a node in the middle of the cylinder
+                if isclose(0.5*(start+t) + 0.5*(start+t+s), L/2) and (nxs % 2) == 0:
+                    xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs+1-1, endpoint=False)))
+                    thetalin = np.concatenate((thetalin, np.ones(nxs+1-1)*thetadeg_s))
+                else:
+                    xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
+                    thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
             xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
             thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
             if i == param_n-1:
@@ -86,6 +92,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
 
     nx = xlin.shape[0]
+    out['nx'] = nx
+    out['ny'] = ny
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
     # closing the cylinder by reassigning last row of node-ids
