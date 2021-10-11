@@ -19,7 +19,7 @@ from bfsccylinder.quadrature import get_points_weights
 num_nodes = 4
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
-        h_tow, param_n, param_f, thetadeg_c, thetadeg_s,
+        h_tow, param_n, s_ratio, thetadeg_c, thetadeg_s,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, load=1000, NLprebuck=False):
@@ -27,69 +27,82 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     circ = 2*np.pi*R
     out = {}
 
+    assert nxt >= 2, 'At least two nodes are required in the transition zone.'
     assert thetadeg_c >= 0
 
-    if param_n == 0 or param_f == 0:
-        print('# constant stiffness case')
-        assert ny is not None
-        nx = int(ny*L/circ/ny_nx_aspect_ratio)
-        if nx % 2 == 0:
-            nx += 1
-        xlin = np.linspace(0, L, nx)
-        thetalin = np.ones_like(xlin)*thetadeg_c
-        t = None
-        c = None
-        s = None
-
+    assert thetadeg_s >= thetadeg_c, 'thetadeg_s must be larger or equal than thetadeg_c'
+    if param_n == 0:
+        s = 0
+        c = L
+        t = 0
+        if ny is not None:
+            nx = int(ny*L/circ)
+            if nx % 2 == 0:
+                nx += 1
+        else:
+            print('# assuming nx=nxt')
+            nx = nxt
+            ny = int(round(nx*circ/L*ny_nx_aspect_ratio, 0))
+        nxc = nx
+        nxs = 0
     else:
-        assert thetadeg_s > thetadeg_c, 'thetadeg_s must be larger than thetadeg_c'
         t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
         nmax = L/(2*t)
         print('# nmax', nmax)
         assert param_n <= nmax
-        cmax = (L - 2*t*param_n)/(param_n+1)
-        if not isclose(cmax, 0):
-            s = param_f/(param_n*(param_f + 1))*(L - 2*t*param_n)
-            c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
-        else:
-            s = 0
-            c = 0
-        assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
-        print('# param_t', t)
-        print('# param_s', s)
-        print('# param_c', c)
-
+        s_max = (L - 2*t*param_n)/param_n
+        s = s_ratio*s_max
+        c = (L - (2*t + s)*param_n)/(param_n + 1)
+        nxc = max(2, int(round(c/t*nxt, 0)))
+        nxs = max(2, int(round(s/t*nxt, 0)))
         dx = t/(nxt-1)
         if ny is None:
             ny = int(round(circ/dx*ny_nx_aspect_ratio, 0))
-        nxc = max(2, int(round(c/t*nxt, 0)))
-        nxs = max(2, int(round(s/t*nxt, 0)))
-        print('# nxc', nxc)
-        print('# nxs', nxs)
-        xlin = np.linspace(0, c, nxc-1, endpoint=False)
-        thetalin = np.ones(nxc-1)*thetadeg_c
-        for i in range(param_n):
-            start = c + i*(c + 2*t + s)
-            xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
-            thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
-            if not isclose(s, 0):
-                #NOTE to keep always a node in the middle of the cylinder
-                if isclose(0.5*(start+t) + 0.5*(start+t+s), L/2) and (nxs % 2) == 0:
-                    xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs+1-1, endpoint=False)))
-                    thetalin = np.concatenate((thetalin, np.ones(nxs+1-1)*thetadeg_s))
-                else:
-                    xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
-                    thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
-            xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
-            thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
-            if i == param_n-1:
-                endpoint = True
-                neff = nxc
-            else:
-                endpoint = False
-                neff = nxc-1
-            xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, neff, endpoint=endpoint)))
-            thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
+    assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
+    print('# param_t', t)
+    print('# param_s', s)
+    print('# param_c', c)
+    print('# nxt', nxt)
+    print('# nxc', nxc)
+    print('# nxs', nxs)
+    if np.isclose(c, 0):
+        xlin = []
+        thetalin = []
+    else:
+        ntmp = nxc-1
+        if isclose(c/2, L/2) and (nxc % 2) != 0:
+            ntmp += 1
+        if param_n == 0:
+            endpoint = True
+        else:
+            endpoint = False
+        xlin = np.linspace(0, c, ntmp, endpoint=endpoint)
+        thetalin = np.ones(ntmp)*thetadeg_c
+    for i in range(param_n):
+        start = c + i*(c + 2*t + s)
+        xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
+        thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
+        if not isclose(s, 0):
+            #NOTE to keep always a node in the middle of the cylinder
+            ntmp = nxs-1
+            if isclose(0.5*(start+t) + 0.5*(start+t+s), L/2) and (nxs % 2) == 0:
+                ntmp += 1
+            xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, ntmp, endpoint=False)))
+            thetalin = np.concatenate((thetalin, np.ones(ntmp)*thetadeg_s))
+        xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
+        thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
+        if i == param_n-1:
+            endpoint = True
+            neff = nxc
+        else:
+            endpoint = False
+            neff = nxc-1
+        if not np.isclose(c, 0):
+            ntmp = neff
+            if isclose(0.5*(start+t+s+t) + 0.5*(start+t+s+t+c), L/2) and (nxc % 2) == 0:
+                ntmp += 1
+            xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, ntmp, endpoint=endpoint)))
+            thetalin = np.concatenate((thetalin, np.ones(ntmp)*thetadeg_c))
 
     nx = xlin.shape[0]
     out['nx'] = nx
@@ -363,7 +376,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     print('# starting eigenvalue analysis')
     eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            tol=1e-8, sigma=1., mode='buckling')
+            tol=1e-5, sigma=1., mode='buckling')
     load_mult = -eigvals
     print('# finished eigenvalue analysis')
 
