@@ -1,3 +1,4 @@
+import gc
 from functools import partial
 from collections import defaultdict
 
@@ -252,6 +253,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for elem in elements:
         update_KC0(elem, points, weights, KC0r, KC0c, KC0v)
     KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsc()
+    del KC0v, KC0r, KC0c
+    gc.collect()
 
     print('# finished element assembly')
 
@@ -359,6 +362,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         for elem in elements:
             update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
         KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        del KCNLv, KCNLr, KCNLc
+        gc.collect()
+
         KC = KC0 + KCNL
         KCuu = KC[bu, :][:, bu]
 
@@ -372,6 +378,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
+    del KGv, KGr, KGc
+    gc.collect()
     KGuu = KG[bu, :][:, bu]
 
     print('# starting eigenvalue analysis')
@@ -427,7 +435,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     phi30e_ab = {}
     phi20e_a = {}
     phi20_a = {}
-    phi2 = np.zeros((N, N))
+    #phi2 = np.zeros((N, N))
     phi200_ab = {}
     for modei in range(koiter_num_modes):
         phi20_a[modei] = np.zeros(N)
@@ -489,7 +497,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 phi3e_ab[(modei, modej)] *= 0
                 phi30e_ab[(modei, modej)] *= 0
 
-        phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
+        #phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
 
         for i in range(nint):
             xi = points[i]
@@ -529,9 +537,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 ei0 = ej0 = Bm @ u0e #NOTE ignoring NL terms
                 ki0 = kj0 = Bb @ u0e
 
-                #TODO why lambda_i[0]?
-                ei = ei0*lambda_a[0]
-                ki = ki0*lambda_a[0]
+                ##TODO why lambda_i[0]?
+                #ei = ei0*lambda_a[0]
+                #ki = ki0*lambda_a[0]
 
                 ei00 = ej00 = np.array([w0_x**2, w0_y**2, 2*w0_x*w0_y])
                 ki00 = 0
@@ -539,14 +547,14 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 Ni0 = Aij@ej0 + Bij@kj0
                 Ni00 = Aij@ej00
 
-                #TODO why lambda_a[0]?
-                Ni = Ni0*lambda_a[0]
+                ##TODO why lambda_a[0]?
+                #Ni = Ni0*lambda_a[0]
 
                 eia = eib = eic = Bm #NOTE ignoring NL terms
                 kia = kib = kic = Bb
 
                 Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
-                Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
+                #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
                 eia0 = eib0 = eic0 = [w0_x*Nw_x[0],
                                       w0_y*Nw_y[0],
@@ -568,15 +576,15 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
                 Miab = Miac = Miad = Miad = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
 
-                phi2e += 1/2.*weight*(lex*ley/4.)*(
-                             es('iab,i->ab', Niab, ei)
-                           + es('ia,ib->ab', Nia, eib)
-                           + es('ib,ia->ab', Nib, eia)
-                           + es('i,iab->ab', Ni, eiab)
-                           + es('iab,i->ab', Miab, ki)
-                           + es('ia,ib->ab', Mia, kib)
-                           + es('ib,ia->ab', Mib, kia)
-                        )
+                #phi2e += 1/2.*weight*(lex*ley/4.)*(
+                             #es('iab,i->ab', Niab, ei)
+                           #+ es('ia,ib->ab', Nia, eib)
+                           #+ es('ib,ia->ab', Nib, eia)
+                           #+ es('i,iab->ab', Ni, eiab)
+                           #+ es('iab,i->ab', Miab, ki)
+                           #+ es('ia,ib->ab', Mia, kib)
+                           #+ es('ib,ia->ab', Mib, kia)
+                        #)
 
                 for modei in range(koiter_num_modes):
                     ua1 = uae[modei]
@@ -638,16 +646,22 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                             for model in range(koiter_num_modes):
                                 phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
 
-        tmp = np.zeros((N, num_nodes*DOF))
-        tmp[indices] = phi2e
-        phi2[:, indices] += tmp
+        #tmp = np.zeros((N, num_nodes*DOF))
+        #tmp[indices] = phi2e
+        #phi2[:, indices] += tmp
         for modei in range(koiter_num_modes):
             phi20_a[modei][indices] += phi20e_a[modei]
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    phi2uu = phi2[bu, :][:, bu]
+    #TODO phi2uu = phi2[bu, :][:, bu]
+    if NLprebuck:
+        phi2 = KC + KG #TODO with KG?
+        phi2uu = KCuu + KGuu #TODO with KGuu?
+    else:
+        phi2 = KC
+        phi2uu = KCuu
 
     phi2_ab = {}
     for modei in range(koiter_num_modes):
@@ -681,7 +695,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually
