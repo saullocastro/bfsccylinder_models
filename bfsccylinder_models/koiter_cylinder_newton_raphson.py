@@ -242,7 +242,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     print('# starting eigenvalue analysis')
     eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            tol=1e-8, sigma=1., mode='buckling')
+            tol=1e-5, sigma=1., mode='buckling')
     load_mult = -eigvals
     print('# finished eigenvalue analysis')
 
@@ -307,9 +307,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     # higher-order tensors for elements
 
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
-    Aij = prop.ABD[:3, :3]
-    Bij = prop.ABD[:3, 3:]
-    Dij = prop.ABD[3:, 3:]
+    Aij = prop.A
+    Bij = prop.B
+    Dij = prop.D
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
             print('#    count', count+1, num_elements)
@@ -542,7 +542,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually

@@ -32,7 +32,7 @@ def test_pm45():
     thetadeg_s = 45
 
     load = 1000
-    NLprebuck = False
+    NLprebuck = True
     out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, s_ratio, thetadeg_c, thetadeg_s,
             num_eigvals=2, koiter_num_modes=2, load=load, idealistic_CTS=True,
