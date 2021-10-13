@@ -4,12 +4,12 @@ from collections import defaultdict
 
 try:
     from pypardiso import spsolve
-except:
+except ImportError:
     from scipy.sparse.linalg import spsolve
 
 import numpy as np
 from numpy import isclose
-from scipy.sparse import coo_matrix, csc_matrix
+from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import eigsh
 from composites import laminated_plate
 from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
@@ -18,6 +18,7 @@ from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
 from bfsccylinder.quadrature import get_points_weights
 
 num_nodes = 4
+
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         h_tow, param_n, s_ratio, thetadeg_c, thetadeg_s,
@@ -268,7 +269,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
     u0 = np.zeros(N, dtype=DOUBLE)
-    uk = u0[bk]
 
     print('# starting static analysis')
 
@@ -283,13 +283,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     # sub-matrices corresponding to unknown DOFs
     KC0uu = KC0[bu, :][:, bu]
-    KC0uk = KC0[bu, :][:, bk]
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-
-    Nu = N - bk.sum()
 
     # solving
     uu = spsolve(KC0uu, fext[bu])
@@ -378,8 +375,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
-    del KGv, KGr, KGc
-    gc.collect()
     KGuu = KG[bu, :][:, bu]
 
     print('# starting eigenvalue analysis')
@@ -454,8 +449,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         if count % (num_elements//5) == 0:
             print('#    count', count+1, num_elements)
         eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
-        eiab0 = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
-        eiab00 = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
 
         c1 = elem.c1
         c2 = elem.c2
@@ -481,8 +474,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         ube = uce = ude = uae
 
         indices = []
-        rows = []
-        cols = []
         cs = [c1, c2, c3, c4]
         for ci in cs:
             for i in range(DOF):
@@ -512,10 +503,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                     [elem.B11[i, j], elem.B12[i, j], elem.B16[i, j]],
                     [elem.B12[i, j], elem.B22[i, j], elem.B26[i, j]],
                     [elem.B16[i, j], elem.B26[i, j], elem.B66[i, j]]])
-                Dij = np.array([
-                    [elem.D11[i, j], elem.D12[i, j], elem.D16[i, j]],
-                    [elem.D12[i, j], elem.D22[i, j], elem.D26[i, j]],
-                    [elem.D16[i, j], elem.D26[i, j], elem.D66[i, j]]])
+                #Dij = np.array([
+                    #[elem.D11[i, j], elem.D12[i, j], elem.D16[i, j]],
+                    #[elem.D12[i, j], elem.D22[i, j], elem.D26[i, j]],
+                    #[elem.D16[i, j], elem.D26[i, j], elem.D66[i, j]]])
                 eta = points[j]
                 weight_eta = weights[j]
                 weight = weight_xi * weight_eta
@@ -542,7 +533,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 #ki = ki0*lambda_a[0]
 
                 ei00 = ej00 = np.array([w0_x**2, w0_y**2, 2*w0_x*w0_y])
-                ki00 = 0
 
                 Ni0 = Aij@ej0 + Bij@kj0
                 Ni00 = Aij@ej00
@@ -571,10 +561,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 eicd = eibd = eibc = eiad = eiac = eiab
 
                 Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
-                Miab = Miac = Miad = Miad = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
+                Miab = Miac = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
 
                 Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
-                Miab = Miac = Miad = Miad = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
+                Miab = Miac = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
 
                 #phi2e += 1/2.*weight*(lex*ley/4.)*(
                              #es('iab,i->ab', Niab, ei)

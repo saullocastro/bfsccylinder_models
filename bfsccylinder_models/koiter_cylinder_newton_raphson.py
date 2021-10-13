@@ -4,14 +4,13 @@ from collections import defaultdict
 
 try:
     from pypardiso import spsolve
-except:
+except ImportError:
     from scipy.sparse.linalg import spsolve
 
 import numpy as np
 from numpy import isclose
-from scipy.sparse import coo_matrix, csc_matrix
+from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import eigsh
-from composites import laminated_plate
 from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
         update_fint, DOF, DOUBLE, INT, KC0_SPARSE_SIZE, KCNL_SPARSE_SIZE,
         KG_SPARSE_SIZE)
@@ -19,6 +18,7 @@ from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder.utils import assign_constant_ABD
 
 num_nodes = 4
+
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
@@ -126,7 +126,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
     u0 = np.zeros(N, dtype=DOUBLE)
-    uk = u0[bk]
 
     print('# starting static analysis')
 
@@ -141,13 +140,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     # sub-matrices corresponding to unknown DOFs
     KC0uu = KC0[bu, :][:, bu]
-    KC0uk = KC0[bu, :][:, bk]
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-
-    Nu = N - bk.sum()
 
     # solving
     uu = spsolve(KC0uu, fext[bu])
@@ -236,8 +232,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
-    del KGv, KGr, KGc
-    gc.collect()
     KGuu = KG[bu, :][:, bu]
 
     print('# starting eigenvalue analysis')
@@ -309,13 +303,11 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
     Aij = prop.A
     Bij = prop.B
-    Dij = prop.D
+    #Dij = prop.D
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
             print('#    count', count+1, num_elements)
         eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
-        eiab0 = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
-        eiab00 = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
 
         c1 = elem.c1
         c2 = elem.c2
@@ -341,8 +333,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         ube = uce = ude = uae
 
         indices = []
-        rows = []
-        cols = []
         cs = [c1, c2, c3, c4]
         for ci in cs:
             for i in range(DOF):
@@ -389,7 +379,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 #ki = ki0*lambda_a[0]
 
                 ei00 = ej00 = np.array([w0_x**2, w0_y**2, 2*w0_x*w0_y])
-                ki00 = 0
 
                 Ni0 = Aij@ej0 + Bij@kj0
                 Ni00 = Aij@ej00
