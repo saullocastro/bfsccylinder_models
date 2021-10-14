@@ -24,7 +24,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         h_tow, param_n, s_ratio, thetadeg_c, thetadeg_s,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
-        koiter_num_modes=1, load=1000, NLprebuck=False):
+        koiter_num_modes=1, load=1000, NLprebuck=False,
+        max_ny_nx_aspect_ratio=2):
 
     circ = 2*np.pi*R
     out = {}
@@ -60,6 +61,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         dx = t/(nxt-1)
         if ny is None:
             ny = int(round(circ/dx*ny_nx_aspect_ratio, 0))
+        dy = circ/ny
+        if dy/dx > max_ny_nx_aspect_ratio:
+            dxtmp = dy/max_ny_nx_aspect_ratio
+            nxc = max(2, int(round(c/dxtmp, 0)))
+            nxs = max(2, int(round(s/dxtmp, 0)))
     assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
     print('# param_t', t)
     print('# param_s', s)
