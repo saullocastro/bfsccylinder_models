@@ -52,7 +52,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
         nmax = L/(2*t)
         print('# nmax', nmax)
-        assert param_n <= nmax
+        if param_n > nmax:
+            print('# param_n changed from ', param_n)
+            print('#                 to   ', int(nmax))
+            param_n = int(nmax)
         s_max = (L - 2*t*param_n)/param_n
         s = s_ratio*s_max
         c = (L - (2*t + s)*param_n)/(param_n + 1)
