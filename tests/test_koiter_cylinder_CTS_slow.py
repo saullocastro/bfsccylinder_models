@@ -27,14 +27,14 @@ def test_pm45():
 
     nxt = 2
     param_n = 0
-    s_ratio = 0
-    thetadeg_c = 45
-    thetadeg_s = 45
+    c2_ratio = 0
+    thetadeg_c1 = 45
+    thetadeg_c2 = 45
 
     load = 1000
     NLprebuck = True
     out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
-            rho, tow_thick, param_n, s_ratio, thetadeg_c, thetadeg_s,
+            rho, tow_thick, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
             num_eigvals=2, koiter_num_modes=2, load=load, idealistic_CTS=True,
             NLprebuck=NLprebuck)
     print('cylinder_CTS eigvals', out1['eigvals'])
