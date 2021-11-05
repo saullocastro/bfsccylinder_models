@@ -122,7 +122,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     checkSS = isclose(x, 0) | isclose(x, L)
     bk[3::DOF] = checkSS
     bk[6::DOF] = checkSS
-    check = isclose(x, L/2.)
+    check = isclose(x, L/2.) & isclose(y, 0)
+    assert check.sum() == 1
     bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
     u0 = np.zeros(N, dtype=DOUBLE)
@@ -228,6 +229,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     print('# finished static analysis')
 
+    #NOTE u0 represents the latest linear or nonlinear pre-buckling state
+
     KGv *= 0
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
@@ -236,7 +239,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     print('# starting eigenvalue analysis')
     eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            tol=1e-5, sigma=1., mode='buckling')
+            tol=1e-6, sigma=1., mode='buckling')
     load_mult = -eigvals
     print('# finished eigenvalue analysis')
 
@@ -244,12 +247,11 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     print('# eigvals', load_mult)
     print('# critical buckling load', Pcr)
 
+    out['P0'] = load
     out['Pcr'] = Pcr
-    out['volume'] = volume
-    out['mass'] = mass
-    out['havg'] = havg
     out['cg_x0'] = cg_x0
-    out['eigvals'] = load_mult
+    out['eigvals'] = eigvals
+    out['load_mult'] = load_mult
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
@@ -260,7 +262,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     lambda_a = {}
     for modei in range(koiter_num_modes):
-        lambda_a[modei] = eigvals[modei]
+        lambda_a[modei] = load_mult[modei]
 
     es = partial(np.einsum, optimize='greedy', casting='no')
     #from opt_einsum import contract
@@ -271,12 +273,13 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
-            ua[modei] /= abs(ua[modei][6::DOF].max())
-        elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
-            ua[modei] /= ua[modei][6::DOF].max()
-        else:
-            ua[modei] /= ua[modei][6::DOF].min()
+        #if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
+            #ua[modei] /= abs(ua[modei][6::DOF].max())
+        #elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
+            #ua[modei] /= ua[modei][6::DOF].max()
+        #else:
+            #ua[modei] /= ua[modei][6::DOF].min()
+        ua[modei] /= ua[modei].max()
         ua[modei] *= havg
 
     phi4 = defaultdict(lambda: 0)
@@ -297,6 +300,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             phi30_ab[(modei, modej)] = np.zeros(N)
             phi3e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
             phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
+
+
+    #NOTE I noticed that, in order to get DIANA's result, the linear
+    #     pre-buckling state ignores all nonlinear quantities in the
+    #     calculations of the strains and its derivatives
+    #     Therefore, I am using this pythflag that multiply the referred nonlinear
+    #     terms
+    flag = NLprebuck
 
     # higher-order tensors for elements
 
@@ -371,14 +382,19 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 Bm = np.asarray(elem.Bm)
                 Bb = np.asarray(elem.Bb)
 
-                ei0 = ej0 = Bm @ u0e #NOTE ignoring NL terms
+                #NOTE, added NL terms
+                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*w0_x**2,
+                                                      lambda_a[0]*w0_y**2,
+                                                      lambda_a[0]*2*w0_x*w0_y])
                 ki0 = kj0 = Bb @ u0e
 
                 ##TODO why lambda_i[0]?
                 #ei = ei0*lambda_a[0]
                 #ki = ki0*lambda_a[0]
 
-                ei00 = ej00 = np.array([w0_x**2, w0_y**2, 2*w0_x*w0_y])
+                ei00 = ej00 = flag*np.array([w0_x**2,
+                                             w0_y**2,
+                                             2*w0_x*w0_y])
 
                 Ni0 = Aij@ej0 + Bij@kj0
                 Ni00 = Aij@ej00
@@ -386,19 +402,22 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 ##TODO why lambda_a[0]?
                 #Ni = Ni0*lambda_a[0]
 
-                eia = eib = eic = Bm #NOTE ignoring NL terms
+                #NOTE, added NL terms
+                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Nw_x[0],
+                                                                  w0_y*Nw_y[0],
+                                                                  w0_x*Nw_y[0] + w0_y*Nw_x[0]])
+
                 kia = kib = kic = Bb
 
                 Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
                 #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                eia0 = eib0 = eic0 = [w0_x*Nw_x[0],
-                                      w0_y*Nw_y[0],
-                                      w0_x*Nw_y[0] + w0_y*Nw_x[0]]
+                eia0 = eib0 = eic0 = flag*np.array([w0_x*Nw_x[0],
+                                                    w0_y*Nw_y[0],
+                                                    w0_x*Nw_y[0] + w0_y*Nw_x[0]])
 
                 Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
                 Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
-
 
                 eiab[0] = Nw_x.T @ Nw_x
                 eiab[1] = Nw_y.T @ Nw_y
@@ -407,17 +426,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 eicd = eibd = eibc = eiad = eiac = eiab
 
                 Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
-                Miab = Miac = Miad = Miad = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
-
-                Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
-                Miab = Miac = Miad = Miad = Mibc = Mibd = Micd = es('ij,jab->iab', Bij, eiab)
+                Miab = Miac = Mibc = es('ij,jab->iab', Bij, eiab)
 
                 #phi2e += 1/2.*weight*(lex*ley/4.)*(
-                             #es('iab,i->ab', Niab, ei)
+                           #  es('iab,i->ab', Niab, ei) #NOTE this is KG
                            #+ es('ia,ib->ab', Nia, eib)
                            #+ es('ib,ia->ab', Nib, eia)
-                           #+ es('i,iab->ab', Ni, eiab)
-                           #+ es('iab,i->ab', Miab, ki)
+                           #+ es('i,iab->ab', Ni, eiab) #NOTE this is KG
+                           #+ es('iab,i->ab', Miab, ki) #NOTE this is KG
                            #+ es('ia,ib->ab', Mia, kib)
                            #+ es('ib,ia->ab', Mib, kia)
                         #)
@@ -492,12 +508,24 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
     #TODO phi2uu = phi2[bu, :][:, bu]
-    if NLprebuck:
-        phi2 = KC + KG #TODO with KG?
-        phi2uu = KCuu + KGuu #TODO with KGuu?
-    else:
-        phi2 = KC
-        phi2uu = KCuu
+    #if NLprebuck:
+        #phi2 = KC + KG #TODO with KG?
+        #phi2uu = KCuu + KGuu #TODO with KGuu?
+    #else:
+    if flag == 1:
+        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0*lambda_a[0], elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    #NOTE I checked and phi2 can be really defined using K + KNL + KG
+    phi2 = KC + KG*lambda_a[0]
+    phi2uu = KCuu + KGuu*lambda_a[0]
 
     phi2_ab = {}
     for modei in range(koiter_num_modes):
