@@ -35,7 +35,7 @@ def test_Sun_et_al():
     print('normalized buckling load', out['Pcr']/Ncl)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    assert np.isclose(b_1111, -0.041770251378139944)
+    assert np.isclose(b_1111, -0.04192599251428145, rtol=0.02)
 
 
 def test_Arbocz_Starnes_2002():
@@ -65,7 +65,7 @@ def test_Arbocz_Starnes_2002():
     print(ans)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    assert np.isclose(b_1111, -0.8048125534937999)
+    assert np.isclose(b_1111, -0.8046810677267613, rtol=0.02)
 
 if __name__ == '__main__':
     test_Arbocz_Starnes_2002()
