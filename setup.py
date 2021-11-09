@@ -11,7 +11,7 @@ from Cython.Build import cythonize
 
 
 is_released = True
-version = '0.2.25'
+version = '0.2.30'
 
 
 def git_version():
