@@ -43,7 +43,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     cdef np.ndarray[cDOUBLE, ndim=1] u0e, u0
     cdef np.ndarray[cDOUBLE, ndim=2] eia0, eib0, eic0
     cdef np.ndarray[cDOUBLE, ndim=2] eia, eib, eic, kia, kib, kic
-    cdef np.ndarray[cDOUBLE, ndim=2] phi2, phi2e
+    #cdef np.ndarray[cDOUBLE, ndim=2] phi2, phi2e
 
     cdef np.ndarray[cDOUBLE, ndim=2] Nia, Nib, Nic, Mia, Mib
     cdef np.ndarray[cDOUBLE, ndim=2] Nia0, Nib0, Nic0, Mia0, Mib0
@@ -280,7 +280,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     #     calculations of the strains and its derivatives
     #     Therefore, I am using this pythflag that multiply the referred nonlinear
     #     terms
-    flag = NLprebuck
+    #flag = NLprebuck
 
     # higher-order tensors for elements
 
@@ -456,15 +456,15 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                 Niac = Niad = Nibc = Nibd = Nicd = Niab
                 Miac = Miad = Mibc = Miab
 
-                phi2e += 1/2.*weight*(lex*ley/4.)*(
-                             es('iab,i->ab', Niab, ei)
-                           + es('ia,ib->ab', Nia, eib)
-                           + es('ib,ia->ab', Nib, eia)
-                           + es('i,iab->ab', Ni, eiab)
-                           + es('iab,i->ab', Miab, ki)
-                           + es('ia,ib->ab', Mia, kib)
-                           + es('ib,ia->ab', Mib, kia)
-                        )
+                #phi2e += 1/2.*weight*(lex*ley/4.)*(
+                             #es('iab,i->ab', Niab, ei)
+                           #+ es('ia,ib->ab', Nia, eib)
+                           #+ es('ib,ia->ab', Nib, eia)
+                           #+ es('i,iab->ab', Ni, eiab)
+                           #+ es('iab,i->ab', Miab, ki)
+                           #+ es('ia,ib->ab', Mia, kib)
+                           #+ es('ib,ia->ab', Mib, kia)
+                        #)
 
                 for modei in range(koiter_num_modes):
                     ua1 = uae[modei]
@@ -527,15 +527,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                                 phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
 
         tmp *= 0
-        tmp[indices] = phi2e
-        phi2[:, indices] += tmp
+        #tmp[indices] = phi2e
+        #phi2[:, indices] += tmp
         for modei in range(koiter_num_modes):
             phi20_a[modei][indices] += phi20e_a[modei]
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    #phi2 = KC0
+    #TODO
+    phi2 = KC0
     phi2uu = phi2[bu, :][:, bu]
 
     phi2_ab = {}
