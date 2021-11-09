@@ -1,77 +1,40 @@
-#cython: boundscheck=False
-#cython: wraparound=False
-#cython: cdivision=True
-#cython: nonecheck=False
-#cython: infer_types=False
+import gc
 from functools import partial
 from collections import defaultdict
 
+try:
+    from pypardiso import spsolve
+except ImportError:
+    from scipy.sparse.linalg import spsolve
+
 import numpy as np
-cimport numpy as np
-from numpy import isclose, pi
-from scipy.sparse import coo_matrix, csc_matrix
-from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
-from composites import laminated_plate
-from bfsccylinder import BFSCCylinder, update_KC0, update_KG, KC0_SPARSE_SIZE, KG_SPARSE_SIZE
+from numpy import isclose
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import eigsh
+from bfsccylinder.sanders import (BFSCCylinderSanders, update_KC0, update_KCNL,
+        update_KG, update_fint, DOF, DOUBLE, INT, KC0_SPARSE_SIZE,
+        KCNL_SPARSE_SIZE, KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder.utils import assign_constant_ABD
 
-ctypedef np.int64_t cINT
-INT = np.int64
-ctypedef np.double_t cDOUBLE
-DOUBLE = np.float64
-cdef cINT DOF = 10
-cdef cINT num_nodes = 4
+num_nodes = 4
 
-def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
-        int num_eigvals=2, int koiter_num_modes=1, double load=1000):
 
-    cdef int i, j, k, m, n
-    cdef int modei, modej, modek, model
-    cdef double w0_x, w0_y
-    cdef double ei0[3]
-    cdef double ej0[3]
-    cdef double ei[3]
-    cdef double ki0[3]
-    cdef double kj0[3]
-    cdef double ki[3]
-    cdef double ei00[3]
-    cdef double ej00[3]
-    cdef double Ni[3]
-    cdef double Ni0[3]
-    cdef double Ni00[3]
-    cdef np.ndarray[cDOUBLE, ndim=1] u0e, u0
-    cdef np.ndarray[cDOUBLE, ndim=2] eia0, eib0, eic0
-    cdef np.ndarray[cDOUBLE, ndim=2] eia, eib, eic, kia, kib, kic
-    cdef np.ndarray[cDOUBLE, ndim=2] phi2, phi2e
+def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+        num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False):
 
-    cdef np.ndarray[cDOUBLE, ndim=2] Nia, Nib, Nic, Mia, Mib
-    cdef np.ndarray[cDOUBLE, ndim=2] Nia0, Nib0, Nic0, Mia0, Mib0
+    circ = 2*np.pi*R
+    out = {}
 
-    cdef double[:, :, :] eiab, eicd, eibd, eibc, eiad, eiac
-    cdef double[:, :, :] Niab, Niac, Niad, Nibc, Nibd, Nicd
-    cdef double[:, :, :] Miab, Miac, Miad, Mibc
-
-    eia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-
-    Nia = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Mia = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Nia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Mia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-
-    eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
-    Niab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
-    Miab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
-
-    # geometry our FW cylinders
-    circ = 2*pi*R # m
-
+    out['nx'] = nx
+    out['ny'] = ny
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
     # closing the cylinder by reassigning last row of node-ids
     nids_mesh[:, nids_mesh.shape[1]-1] = nids_mesh[:, 0]
     nids = np.unique(nids_mesh)
     nid_pos = dict(zip(nids, np.arange(len(nids))))
+    out['nid_pos'] = nid_pos
 
     xlin = np.linspace(0, L, nx)
     ytmp = np.linspace(0, circ, ny+1)
@@ -81,9 +44,12 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     ymesh = ymesh.T
 
     # getting nodes
-    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten())).T
+    ncoords = np.vstack((xmesh.flatten(), ymesh.flatten(), np.zeros_like(xmesh.flatten()))).T
     x = ncoords[:, 0]
     y = ncoords[:, 1]
+    out['ncoords'] = ncoords
+    out['x'] = x
+    out['y'] = y
 
     i = nids_mesh.shape[0] - 1
     j = nids_mesh.shape[1] - 1
@@ -95,17 +61,22 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     points, weights = get_points_weights(nint=nint)
 
     num_elements = len(n1s)
-    print('# number of elements,', num_elements)
+    print('# nx', nx)
+    print('# ny', ny)
+    print('# number of elements', num_elements)
 
     elements = []
     N = DOF*nx*ny
-    print('# number of DOF,', N)
+    print('# numbers of DOF', N)
     init_k_KC0 = 0
+    init_k_KCNL = 0
     init_k_KG = 0
     print('# starting element assembly')
+    volume = 0
+    mass = 0
     havg = prop.h # average shell thickness h
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
-        elem = BFSCCylinder(nint)
+        elem = BFSCCylinderSanders(nint)
         elem.n1 = n1
         elem.n2 = n2
         elem.n3 = n3
@@ -115,22 +86,32 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
         elem.c3 = DOF*nid_pos[n3]
         elem.c4 = DOF*nid_pos[n4]
         elem.R = R
-        elem.lex = L/(nx-1) #TODO approximation, assuming evenly distributed element sizes
+        x1 = x[nid_pos[n1]]
+        x2 = x[nid_pos[n2]]
+        elem.lex = x2 - x1
         elem.ley = circ/ny
+        volume += elem.lex*elem.ley*prop.h
+        mass += elem.lex*elem.ley*prop.intrho
         assign_constant_ABD(elem, prop)
         elem.init_k_KC0 = init_k_KC0
+        elem.init_k_KCNL = init_k_KCNL
         elem.init_k_KG = init_k_KG
         init_k_KC0 += KC0_SPARSE_SIZE
+        init_k_KCNL += KCNL_SPARSE_SIZE
         init_k_KG += KG_SPARSE_SIZE
         elements.append(elem)
 
-    Kr = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
-    Kc = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
-    Kv = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+    out['volume'] = volume
+    out['mass'] = mass
+    out['havg'] = havg
+    KC0r = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
+    KC0c = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
+    KC0v = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
     for elem in elements:
-        update_KC0(elem, points, weights, Kr, Kc, Kv)
-
-    KC0 = coo_matrix((Kv, (Kr, Kc)), shape=(N, N)).tocsc()
+        update_KC0(elem, points, weights, KC0r, KC0c, KC0v)
+    KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsc()
+    del KC0v, KC0r, KC0c
+    gc.collect()
 
     print('# finished element assembly')
 
@@ -140,110 +121,179 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     checkSS = isclose(x, 0) | isclose(x, L)
     bk[3::DOF] = checkSS
     bk[6::DOF] = checkSS
-    check = isclose(x, L/2.)
+    check = isclose(x, L/2.) & isclose(y, 0)
+    assert check.sum() == 1
     bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
     u0 = np.zeros(N, dtype=DOUBLE)
-    uk = u0[bk]
 
     print('# starting static analysis')
 
     # axially compressive load applied at x=0 and x=L
-    checkTopEdge = isclose(x, L)
-    checkBottomEdge = isclose(x, 0)
     fext = np.zeros(N)
-    fext[0::DOF][checkBottomEdge] = +load/ny
-    assert np.isclose(fext.sum(), load)
-    fext[0::DOF][checkTopEdge] = -load/ny
-    fu = fext[bu]
-    assert np.isclose(fext.sum(), 0)
+    # applying load
+    for elem in elements:
+        pos1 = nid_pos[elem.n1]
+        pos2 = nid_pos[elem.n2]
+        pos3 = nid_pos[elem.n3]
+        pos4 = nid_pos[elem.n4]
+        if isclose(x[pos3], L):
+            Nxx = -Nxxunit
+            xi = +1
+        elif isclose(x[pos1], 0):
+            Nxx = +Nxxunit
+            xi = -1
+        else:
+            continue
+        lex = elem.lex
+        ley = elem.ley
+        indices = []
+        c1 = DOF*pos1
+        c2 = DOF*pos2
+        c3 = DOF*pos3
+        c4 = DOF*pos4
+        cs = [c1, c2, c3, c4]
+        for ci in cs:
+            for i in range(DOF):
+                indices.append(ci + i)
+        fe = np.zeros(num_nodes*DOF, dtype=float)
+        for j in range(nint):
+            eta = points[j]
+            elem.update_Nu(xi, eta)
+            fe += ley/2.*weights[j]*elem.Nu*Nxx
+        fext[indices] += fe
+    assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
-    Kuu = KC0[bu, :][:, bu]
-    Kuk = KC0[bu, :][:, bk]
-    Kkk = KC0[bk, :][:, bk]
-
-    Nu = N - bk.sum()
-
-    # solving
-    PREC = 1./Kuu.diagonal().max()
-
-    uu, info = cg(PREC*Kuu, PREC*fu, x0=cg_x0, atol=0)
-    if info != 0:
-        print('#   failed with cg()')
-        print('#   trying spsolve()')
-        uu = spsolve(Kuu, fu)
-    cg_x0 = uu.copy()
-
-    u0[bu] = uu
-
-    print('# finished static analysis')
+    KC0uu = KC0[bu, :][:, bu]
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+
+    # solving
+    uu = spsolve(KC0uu, fext[bu])
+    cg_x0 = uu.copy()
+
+    u0[bu] = uu
+
+    if NLprebuck:
+        print('#    initiating nonlinear pre-buckling state')
+        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+
+        def calc_KT(u, KCNLv, KGv):
+            KCNLv *= 0
+            KGv *= 0
+            for elem in elements:
+                update_KCNL(u, elem, points, weights, KCNLr, KCNLc, KCNLv)
+                update_KG(u, elem, points, weights, KGr, KGc, KGv)
+            KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+            KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
+            return KC0 + KCNL + KG
+
+        def calc_fint(u, fint):
+            fint *= 0
+            for elem in elements:
+                update_fint(u, elem, points, weights, fint)
+            return fint
+
+        # solving using Modified Newton-Raphson method
+        def scaling(vec, D):
+            """
+                A. Peano and R. Riccioni, Automated discretisatton error
+                control in finite element analysis. In Finite Elements m
+                the Commercial Enviror&ent (Editei by J. 26.  Robinson),
+                pp. 368-387. Robinson & Assoc., Verwood.  England (1978)
+            """
+            return np.sqrt((vec*np.abs(1/D))@vec)
+
+        iteration = 0
+        fint = np.zeros(N)
+        fint = calc_fint(u0, fint)
+        Ri = fint - fext
+        du = np.zeros(N)
+        ui = u0.copy()
+        epsilon = 1.e-4
+        KT = calc_KT(u0, KCNLv, KGv)
+        KTuu = KT[bu, :][:, bu]
+        D = KC0uu.diagonal() # at beginning of load increment
+        while True:
+            print('#    iteration', iteration)
+            duu = spsolve(KTuu, -Ri[bu])
+            du[bu] = duu
+            u = ui + du
+            fint = calc_fint(u, fint)
+            Ri = fint - fext
+            crisfield_test = scaling(Ri[bu], D)/max(scaling(fext[bu], D), scaling(fint[bu], D))
+            print('#        crisfield_test, max(R)', crisfield_test, np.abs(Ri).max())
+            if crisfield_test < epsilon:
+                print('#    converged')
+                break
+            iteration += 1
+            KT = calc_KT(u, KCNLv, KGv)
+            KTuu = KT[bu, :][:, bu]
+            ui = u.copy()
+        u0 = u.copy()
+
+
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        del KCNLv, KCNLr, KCNLc
+        gc.collect()
+
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    else:
+        KC = KC0
+        KCuu = KC0uu
+
+    print('# finished static analysis')
+
+    #NOTE u0 represents the latest linear or nonlinear pre-buckling state
+
+    KGv *= 0
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
     KGuu = KG[bu, :][:, bu]
 
-    # A * x[i] = lambda[i] * M * x[i]
-    #NOTE this works and seems to be the fastest option
+    print('# starting eigenvalue analysis')
+    #eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
+            #tol=1e-8, sigma=1., mode='buckling')
+    #load_mult = eigvals
+    eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
+            tol=1e-6)
+    load_mult = -1/eigvals
+    print('# finished eigenvalue analysis')
 
-    print('# starting spilu')
-    PREC2 = spilu(PREC*Kuu, diag_pivot_thresh=0, drop_tol=1e-8,
-            fill_factor=50)
-    print('# finished spilu')
-    def matvec(x):
-        return PREC2.solve(x)
-    Kuuinv = LinearOperator(matvec=matvec, shape=(Nu, Nu))
-
-    print('# starting linear buckling analysis')
-
-    maxiter = 1000
-    if lobpcg_X is None:
-        Xu = np.random.rand(Nu, num_eigvals)
-        Xu /= np.linalg.norm(Xu, axis=0)
-    else:
-        Xu = lobpcg_X
-
-    #NOTE default tolerance is too large
-    tol = 1e-5
-    eigvals, eigvecsu, hist = lobpcg(A=PREC*Kuu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
-            maxiter=maxiter, retResidualNormsHistory=True, tol=tol)
-    load_mult = eigvals
-    if not len(hist) <= maxiter:
-        print('#   failed with lobpcg()')
-        print('#   trying eigsh()')
-        eigvals, eigvecsu = eigsh(A=Kuu, k=num_eigvals, which='SM', M=KGuu,
-                tol=1e-7, sigma=1., mode='buckling')
-        load_mult = -eigvals
-
-    print('# finished linear buckling analysis')
-
-    force = np.zeros(N)
-    fk = Kuk.T*uu + Kkk*uk
-    force[bk] = fk
-    Pcr = load_mult[0]*load
+    Pcr = load_mult[0]*Nxxunit*circ
+    print('# load_mult', load_mult)
     print('# critical buckling load', Pcr)
 
-    out = {}
     out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
-    out['lobpcg_X'] = Xu
-    out['eigvals'] = load_mult
+    out['eigvals'] = eigvals
+    out['load_mult'] = load_mult
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
+    out['koiter'] = None
 
     if koiter_num_modes == 0:
         return out
 
     lambda_a = {}
     for modei in range(koiter_num_modes):
-        lambda_a[modei] = eigvals[modei]
+        lambda_a[modei] = load_mult[modei]
 
-    es = partial(np.einsum, optimize='greedy')
+    es = partial(np.einsum, optimize='greedy', casting='no')
+    #from opt_einsum import contract
+    #es = partial(contract)
 
     #NOTE making the maximum amplitude of the eigenmode equal to h
     #normalizing amplitude of eigenvector according to shell thickness
@@ -252,6 +302,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
         ua[modei] = eigvecs[:, modei].copy()
         #NOTE normalizing as Abaqus does, assuming nonzero translations
         ampl = np.sqrt(ua[modei][0::DOF]**2 + ua[modei][3::DOF]**2 + ua[modei][6::DOF]**2).max()
+        #NOTE using ampl = np.linalg.norm(ua[modei]) does not work
         ua[modei] /= ampl
         ua[modei] *= havg
 
@@ -285,10 +336,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     # higher-order tensors for elements
 
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
-    tmp = np.zeros((N, num_nodes*DOF))
+    Aij = prop.A
+    Bij = prop.B
+    #Dij = prop.D
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
-            print(count+1, num_elements)
+            print('#    count', count+1, num_elements)
+        eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
+
         c1 = elem.c1
         c2 = elem.c2
         c3 = elem.c3
@@ -342,129 +397,70 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                 elem.update_Bm(xi, eta)
                 elem.update_Bb(xi, eta)
 
-                w0_x = 0
-                w0_y = 0
-                for k in range(num_nodes*DOF):
-                    w0_x += elem.Nw_x[k]*u0e[k]
-                    w0_y += elem.Nw_y[k]*u0e[k]
-                for k in range(num_nodes*DOF):
-                    eia0[0, k] = w0_x*elem.Nw_x[k]
-                    eia0[1, k] = w0_y*elem.Nw_y[k]
-                    eia0[2, k] = w0_x*elem.Nw_y[k] + w0_y*elem.Nw_x[k]
-                eib0 = eic0 = eia0
+                Nw_x = np.atleast_2d(elem.Nw_x)
+                Nw_y = np.atleast_2d(elem.Nw_y)
 
-                for k in range(3):
-                    ei0[k] = 0
-                    ki0[k] = 0
-                    for m in range(num_nodes*DOF):
-                        ei0[k] += elem.Bm[k, m]*u0e[m] #NOTE ignoring NL terms
-                        ki0[k] += elem.Bb[k, m]*u0e[m]
-                    #TODO why lambda_i[0]?
-                    ej0[k] = ei0[k]
-                    kj0[k] = ki0[k]
-                    ei[k] = ei0[k]*lambda_a[0]
-                    ki[k] = ki0[k]*lambda_a[0]
+                w0_x = Nw_x[0] @ u0e
+                w0_y = Nw_y[0] @ u0e
 
-                ei00[0] = ej00[0] = w0_x**2
-                ei00[1] = ej00[1] = w0_y**2
-                ei00[2] = ej00[2] = 2*w0_x*w0_y
+                Bm = np.asarray(elem.Bm)
+                Bb = np.asarray(elem.Bb)
 
-                ki00 = 0
+                #NOTE, added NL terms
+                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*w0_x**2,
+                                                      lambda_a[0]*w0_y**2,
+                                                      lambda_a[0]*2*w0_x*w0_y])
+                ki0 = kj0 = Bb @ u0e
 
-                A11 = elem.A11[i, j]
-                A12 = elem.A12[i, j]
-                A16 = elem.A16[i, j]
-                A22 = elem.A22[i, j]
-                A26 = elem.A26[i, j]
-                A66 = elem.A66[i, j]
-                B11 = elem.B11[i, j]
-                B12 = elem.B12[i, j]
-                B16 = elem.B16[i, j]
-                B22 = elem.B22[i, j]
-                B26 = elem.B26[i, j]
-                B66 = elem.B66[i, j]
-                D11 = elem.D11[i, j]
-                D12 = elem.D12[i, j]
-                D16 = elem.D16[i, j]
-                D22 = elem.D22[i, j]
-                D26 = elem.D26[i, j]
-                D66 = elem.D66[i, j]
+                ##TODO why lambda_i[0]?
+                #ei = ei0*lambda_a[0]
+                #ki = ki0*lambda_a[0]
 
-                Ni0[0] = (A11*ej0[0] * A12*ej0[1] + A16*ej0[2]
-                        + B11*kj0[0] * B12*kj0[1] + B16*kj0[2])
-                Ni0[1] = (A12*ej0[0] * A22*ej0[1] + A26*ej0[2]
-                        + B12*kj0[0] * B22*kj0[1] + B26*kj0[2])
-                Ni0[2] = (A16*ej0[0] * A26*ej0[1] + A66*ej0[2]
-                        + B16*kj0[0] * B26*kj0[1] + B66*kj0[2])
+                ei00 = ej00 = flag*np.array([w0_x**2,
+                                             w0_y**2,
+                                             2*w0_x*w0_y])
 
-                #TODO why lambda_a[0]?
-                Ni[0] = Ni0[0]*lambda_a[0]
-                Ni[1] = Ni0[1]*lambda_a[0]
-                Ni[2] = Ni0[2]*lambda_a[0]
+                Ni0 = Aij@ej0 + Bij@kj0
+                Ni00 = Aij@ej00
 
-                Ni00[0] = A11*ej00[0] + A12*ej00[1] + A16*ej00[2]
-                Ni00[1] = A12*ej00[0] + A22*ej00[1] + A26*ej00[2]
-                Ni00[2] = A16*ej00[0] + A26*ej00[1] + A66*ej00[2]
+                ##TODO why lambda_a[0]?
+                #Ni = Ni0*lambda_a[0]
 
-                eia = eib = eic = np.asarray(elem.Bm) #NOTE ignoring NL terms
-                kia = kib = kic = np.asarray(elem.Bb)
+                #NOTE, added NL terms
+                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Nw_x[0],
+                                                                  w0_y*Nw_y[0],
+                                                                  w0_x*Nw_y[0] + w0_y*Nw_x[0]])
 
-                for m in range(num_nodes*DOF):
-                    Nia[0, m] = (A11*eia[0, m] + A12*eia[1, m] + A16*eia[2, m]
-                               + B11*kia[0, m] + B12*kia[1, m] + B16*kia[2, m])
-                    Nia[1, m] = (A12*eia[0, m] + A22*eia[1, m] + A26*eia[2, m]
-                               + B12*kia[0, m] + B22*kia[1, m] + B26*kia[2, m])
-                    Nia[2, m] = (A16*eia[0, m] + A26*eia[1, m] + A66*eia[2, m]
-                               + B16*kia[0, m] + B26*kia[1, m] + B66*kia[2, m])
-                    Mia[0, m] = (B11*eia[0, m] + B12*eia[1, m] + B16*eia[2, m]
-                               + D11*kia[0, m] + D12*kia[1, m] + D16*kia[2, m])
-                    Mia[1, m] = (B12*eia[0, m] + B22*eia[1, m] + B26*eia[2, m]
-                               + D12*kia[0, m] + D22*kia[1, m] + D26*kia[2, m])
-                    Mia[2, m] = (B16*eia[0, m] + B26*eia[1, m] + B66*eia[2, m]
-                               + D16*kia[0, m] + D26*kia[1, m] + D66*kia[2, m])
+                kia = kib = kic = Bb
 
-                    Nia0[0, m] = A11*eia0[0, m] + A12*eia0[1, m] + A16*eia0[2, m]
-                    Nia0[1, m] = A12*eia0[0, m] + A22*eia0[1, m] + A26*eia0[2, m]
-                    Nia0[2, m] = A16*eia0[0, m] + A26*eia0[1, m] + A66*eia0[2, m]
-                    Mia0[0, m] = B11*eia0[0, m] + B12*eia0[1, m] + B16*eia0[2, m]
-                    Mia0[1, m] = B12*eia0[0, m] + B22*eia0[1, m] + B26*eia0[2, m]
-                    Mia0[2, m] = B16*eia0[0, m] + B26*eia0[1, m] + B66*eia0[2, m]
-                Nib = Nic = Nia
-                Mib = Mia
+                Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
+                #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                Nib0 = Nic0 = Nia0
-                Mib0 = Mia0
+                eia0 = eib0 = eic0 = flag*np.array([w0_x*Nw_x[0],
+                                                    w0_y*Nw_y[0],
+                                                    w0_x*Nw_y[0] + w0_y*Nw_x[0]])
 
-                #eiab[0, :, :] = es('i,j->ij', elem.Nw_x, elem.Nw_x, out=eiab[0])
-                es('i,j->ij', elem.Nw_x, elem.Nw_x, out=np.asarray(eiab[0]))
-                #eiab[1, :, :] = es('i,j->ij', elem.Nw_y, elem.Nw_y, out=np.asarray(eiab[1]))
-                es('i,j->ij', elem.Nw_y, elem.Nw_y, out=np.asarray(eiab[1]))
-                #eiab[2, :, :] = es('i,j->ij', elem.Nw_x, elem.Nw_y) + es('i,j->ij', elem.Nw_y, elem.Nw_x)
-                es('i,j->ij', elem.Nw_x, elem.Nw_y, out=np.asarray(eiab[2]))
-                es('i,j->ij', elem.Nw_y, elem.Nw_x, out=np.asarray(eiab[2]))
+                Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
+                Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
+
+                eiab[0] = Nw_x.T @ Nw_x
+                eiab[1] = Nw_y.T @ Nw_y
+                eiab[2] = Nw_x.T @ Nw_y + Nw_y.T @ Nw_x
+
                 eicd = eibd = eibc = eiad = eiac = eiab
 
-                for m in range(num_nodes*DOF):
-                    for n in range(num_nodes*DOF):
-                        Niab[0, m, n] = A11*eiab[0, m, n] + A12*eiab[1, m, n] + A16*eiab[2, m, n]
-                        Niab[1, m, n] = A12*eiab[0, m, n] + A22*eiab[1, m, n] + A26*eiab[2, m, n]
-                        Niab[2, m, n] = A16*eiab[0, m, n] + A26*eiab[1, m, n] + A66*eiab[2, m, n]
-                        Miab[0, m, n] = B11*eiab[0, m, n] + B12*eiab[1, m, n] + B16*eiab[2, m, n]
-                        Miab[1, m, n] = B12*eiab[0, m, n] + B22*eiab[1, m, n] + B26*eiab[2, m, n]
-                        Miab[2, m, n] = B16*eiab[0, m, n] + B26*eiab[1, m, n] + B66*eiab[2, m, n]
+                Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
+                Miab = Miac = Mibc = es('ij,jab->iab', Bij, eiab)
 
-                Niac = Niad = Nibc = Nibd = Nicd = Niab
-                Miac = Miad = Mibc = Miab
-
-                phi2e += 1/2.*weight*(lex*ley/4.)*(
-                             es('iab,i->ab', Niab, ei)
-                           + es('ia,ib->ab', Nia, eib)
-                           + es('ib,ia->ab', Nib, eia)
-                           + es('i,iab->ab', Ni, eiab)
-                           + es('iab,i->ab', Miab, ki)
-                           + es('ia,ib->ab', Mia, kib)
-                           + es('ib,ia->ab', Mib, kia)
-                        )
+                #phi2e += 1/2.*weight*(lex*ley/4.)*(
+                           #  es('iab,i->ab', Niab, ei) #NOTE this is KG
+                           #+ es('ia,ib->ab', Nia, eib)
+                           #+ es('ib,ia->ab', Nib, eia)
+                           #+ es('i,iab->ab', Ni, eiab) #NOTE this is KG
+                           #+ es('iab,i->ab', Miab, ki) #NOTE this is KG
+                           #+ es('ia,ib->ab', Mia, kib)
+                           #+ es('ib,ia->ab', Mib, kia)
+                        #)
 
                 for modei in range(koiter_num_modes):
                     ua1 = uae[modei]
@@ -526,17 +522,34 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                             for model in range(koiter_num_modes):
                                 phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
 
-        tmp *= 0
-        tmp[indices] = phi2e
-        phi2[:, indices] += tmp
+        #tmp = np.zeros((N, num_nodes*DOF))
+        #tmp[indices] = phi2e
+        #phi2[:, indices] += tmp
         for modei in range(koiter_num_modes):
             phi20_a[modei][indices] += phi20e_a[modei]
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    #phi2 = KC0
-    phi2uu = phi2[bu, :][:, bu]
+    #TODO phi2uu = phi2[bu, :][:, bu]
+    #if NLprebuck:
+        #phi2 = KC + KG #TODO with KG?
+        #phi2uu = KCuu + KGuu #TODO with KGuu?
+    #else:
+    if flag == 1:
+        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0*lambda_a[0], elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    #NOTE I checked and phi2 can be really defined using K + KNL + KG
+    phi2 = KC + KG*lambda_a[0]
+    phi2uu = KCuu + KGuu*lambda_a[0]
 
     phi2_ab = {}
     for modei in range(koiter_num_modes):
@@ -544,7 +557,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
         for modej in range(koiter_num_modes):
             phi2_ab[(modei, modej)] = left @ ua[modej]
 
-    print()
+    print('# a_ijk factors')
     a_abc = {}
     for modei in range(koiter_num_modes):
         lambda_i = lambda_a[modei]
@@ -552,9 +565,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
             for modek in range(koiter_num_modes):
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
-                print('$a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
-    print()
-
+                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
     force2ndorder_ij = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
@@ -572,7 +583,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually
@@ -581,8 +592,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                 ui = ua[modek]
                 uab[(modei, modej)] -= ui*np.dot(uijbar, ui)/np.dot(ui, ui)
 
+    print('# b_ijkl factors')
     b_ijkl = {}
-
     for modei in range(koiter_num_modes):
         phi20_i = phi20_a[modei]
         lambda_i = lambda_a[modei]
@@ -604,7 +615,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, lobpcg_X=None, int nint=4,
                                +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]
                                 )
                             )
-                    print('$b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
+                    print('# $b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
                         modek+1, model+1, b_ijkl[(modei, modej, modek, model)]))
 
     koiter = dict(

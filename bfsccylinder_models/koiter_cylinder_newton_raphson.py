@@ -21,7 +21,7 @@ num_nodes = 4
 
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
-        num_eigvals=2, koiter_num_modes=1, load=1000, NLprebuck=False):
+        num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False):
 
     circ = 2*np.pi*R
     out = {}
@@ -104,7 +104,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     out['volume'] = volume
     out['mass'] = mass
     out['havg'] = havg
-    out['elements'] = elements
     KC0r = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     KC0c = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=INT)
     KC0v = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
@@ -131,12 +130,38 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     print('# starting static analysis')
 
     # axially compressive load applied at x=0 and x=L
-    checkTopEdge = isclose(x, L)
-    checkBottomEdge = isclose(x, 0)
     fext = np.zeros(N)
-    fext[0::DOF][checkBottomEdge] = +load/ny
-    assert isclose(fext.sum(), load)
-    fext[0::DOF][checkTopEdge] = -load/ny
+    # applying load
+    for elem in elements:
+        pos1 = nid_pos[elem.n1]
+        pos2 = nid_pos[elem.n2]
+        pos3 = nid_pos[elem.n3]
+        pos4 = nid_pos[elem.n4]
+        if isclose(x[pos3], L):
+            Nxx = -Nxxunit
+            xi = +1
+        elif isclose(x[pos1], 0):
+            Nxx = +Nxxunit
+            xi = -1
+        else:
+            continue
+        lex = elem.lex
+        ley = elem.ley
+        indices = []
+        c1 = DOF*pos1
+        c2 = DOF*pos2
+        c3 = DOF*pos3
+        c4 = DOF*pos4
+        cs = [c1, c2, c3, c4]
+        for ci in cs:
+            for i in range(DOF):
+                indices.append(ci + i)
+        fe = np.zeros(num_nodes*DOF, dtype=float)
+        for j in range(nint):
+            eta = points[j]
+            elem.update_Nu(xi, eta)
+            fe += ley/2.*weights[j]*elem.Nu*Nxx
+        fext[indices] += fe
     assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
@@ -238,16 +263,18 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     KGuu = KG[bu, :][:, bu]
 
     print('# starting eigenvalue analysis')
-    eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            tol=1e-6, sigma=1., mode='buckling')
-    load_mult = -eigvals
+    #eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
+            #tol=1e-8, sigma=1., mode='buckling')
+    #load_mult = eigvals
+    eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
+            tol=1e-6)
+    load_mult = -1/eigvals
     print('# finished eigenvalue analysis')
 
-    Pcr = load_mult[0]*load
-    print('# eigvals', load_mult)
+    Pcr = load_mult[0]*Nxxunit*circ
+    print('# load_mult', load_mult)
     print('# critical buckling load', Pcr)
 
-    out['P0'] = load
     out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
     out['eigvals'] = eigvals
@@ -273,13 +300,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        #if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
-            #ua[modei] /= abs(ua[modei][6::DOF].max())
-        #elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
-            #ua[modei] /= ua[modei][6::DOF].max()
-        #else:
-            #ua[modei] /= ua[modei][6::DOF].min()
-        ua[modei] /= ua[modei].max()
+        #NOTE normalizing as Abaqus does, assuming nonzero translations
+        ampl = np.sqrt(ua[modei][0::DOF]**2 + ua[modei][3::DOF]**2 + ua[modei][6::DOF]**2).max()
+        #NOTE using ampl = np.linalg.norm(ua[modei]) does not work
+        ua[modei] /= ampl
         ua[modei] *= havg
 
     phi4 = defaultdict(lambda: 0)

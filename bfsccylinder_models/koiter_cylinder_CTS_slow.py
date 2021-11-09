@@ -24,8 +24,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         h_tow, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
-        koiter_num_modes=1, load=1000, NLprebuck=False,
-        max_ny_nx_aspect_ratio=2):
+        koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
+        max_ny_nx_aspect_ratio=2, zero_offset=False):
 
     circ = 2*np.pi*R
     out = {}
@@ -214,6 +214,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             plyts = (plyt_local, plyt_local)
 
             offset = sum(plyts)/2.
+            if zero_offset:
+                offset = 0
             prop = laminated_plate(stack=stack, plyts=plyts, laminaprop=laminaprop, offset=offset, rho=rho)
             for j in range(nint):
                 wj = weights[j]
@@ -258,7 +260,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     out['thetadegavg_elements'] = thetadegavg_elements
     out['havg_elements'] = havg_elements
     out['havg'] = havg
-    out['elements'] = elements
 
     if mesh_only:
         return out
@@ -289,12 +290,38 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# starting static analysis')
 
     # axially compressive load applied at x=0 and x=L
-    checkTopEdge = isclose(x, L)
-    checkBottomEdge = isclose(x, 0)
     fext = np.zeros(N)
-    fext[0::DOF][checkBottomEdge] = +load/ny
-    assert isclose(fext.sum(), load)
-    fext[0::DOF][checkTopEdge] = -load/ny
+    # applying load
+    for elem in elements:
+        pos1 = nid_pos[elem.n1]
+        pos2 = nid_pos[elem.n2]
+        pos3 = nid_pos[elem.n3]
+        pos4 = nid_pos[elem.n4]
+        if isclose(x[pos3], L):
+            Nxx = -Nxxunit
+            xi = +1
+        elif isclose(x[pos1], 0):
+            Nxx = +Nxxunit
+            xi = -1
+        else:
+            continue
+        lex = elem.lex
+        ley = elem.ley
+        indices = []
+        c1 = DOF*pos1
+        c2 = DOF*pos2
+        c3 = DOF*pos3
+        c4 = DOF*pos4
+        cs = [c1, c2, c3, c4]
+        for ci in cs:
+            for i in range(DOF):
+                indices.append(ci + i)
+        fe = np.zeros(num_nodes*DOF, dtype=float)
+        for j in range(nint):
+            eta = points[j]
+            elem.update_Nu(xi, eta)
+            fe += ley/2.*weights[j]*elem.Nu*Nxx
+        fext[indices] += fe
     assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
@@ -370,7 +397,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             ui = u.copy()
         u0 = u.copy()
 
-
         KCNLv *= 0
         for elem in elements:
             update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
@@ -396,16 +422,18 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     KGuu = KG[bu, :][:, bu]
 
     print('# starting eigenvalue analysis')
-    eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            tol=1e-6, sigma=1., mode='buckling')
-    load_mult = -eigvals
+    #eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
+            #tol=1e-8, sigma=1., mode='buckling')
+    #load_mult = eigvals
+    eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
+            tol=1e-6)
+    load_mult = -1/eigvals
     print('# finished eigenvalue analysis')
 
-    Pcr = load_mult[0]*load
-    print('# eigvals', load_mult)
+    Pcr = load_mult[0]*Nxxunit*circ
+    print('# load_mult', load_mult)
     print('# critical buckling load', Pcr)
 
-    out['P0'] = load
     out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
     out['eigvals'] = eigvals
@@ -426,21 +454,15 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         lambda_a[modei] = load_mult[modei]
 
     es = partial(np.einsum, optimize='greedy', casting='no')
-    #from opt_einsum import contract
-    #es = partial(contract)
 
     #NOTE making the maximum amplitude of the eigenmode equal to h
     #normalizing amplitude of eigenvector according to shell thickness
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        #if isclose(abs(ua[modei][6::DOF].max()), abs(ua[modei][6::DOF].min())):
-            #ua[modei] /= abs(ua[modei][6::DOF].max())
-        #elif abs(ua[modei][6::DOF].max()) >= abs(ua[modei][6::DOF].min()):
-            #ua[modei] /= ua[modei][6::DOF].max()
-        #else:
-            #ua[modei] /= ua[modei][6::DOF].min()
-        ua[modei] /= ua[modei].max()
+        #NOTE normalizing as Abaqus does, assuming nonzero translations
+        ampl = np.sqrt(ua[modei][0::DOF]**2 + ua[modei][3::DOF]**2 + ua[modei][6::DOF]**2).max()
+        ua[modei] /= ampl
         ua[modei] *= havg
 
     phi4 = defaultdict(lambda: 0)

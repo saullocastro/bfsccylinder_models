@@ -1,136 +1,129 @@
-#cython: boundscheck=False
-#cython: wraparound=False
-#cython: cdivision=True
-#cython: nonecheck=False
-#cython: infer_types=False
+import gc
 from functools import partial
 from collections import defaultdict
 
+try:
+    from pypardiso import spsolve
+except ImportError:
+    from scipy.sparse.linalg import spsolve
+
 import numpy as np
-cimport numpy as np
-from numpy import isclose, pi
-from scipy.sparse import coo_matrix, csc_matrix
-from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
+from numpy import isclose
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import eigsh
 from composites import laminated_plate
-from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
-        KC0_SPARSE_SIZE, KCNL_SPARSE_SIZE, KG_SPARSE_SIZE)
+from bfsccylinder.sanders import (BFSCCylinderSanders, update_KC0, update_KCNL,
+        update_KG, update_fint, DOF, DOUBLE, INT, KC0_SPARSE_SIZE,
+        KCNL_SPARSE_SIZE, KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
 
-ctypedef np.int64_t cINT
-INT = np.int64
-ctypedef np.double_t cDOUBLE
-DOUBLE = np.float64
-cdef cINT DOF = 10
-cdef cINT num_nodes = 4
+num_nodes = 4
+
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
-        h_tow, param_n, param_f, thetadeg_c, thetadeg_s, idealistic_CTS=False,
-        mesh_only=False, clamped=True, cg_x0=None, lobpcg_X=None, int nint=4,
-        int num_eigvals=2, int koiter_num_modes=1):
-
-
-    cdef int i, j, k, m, n
-    cdef int modei, modej, modek, model
-    cdef double A11, A12, A16, A22, A26, A66
-    cdef double B11, B12, B16, B22, B26, B66
-    cdef double D11, D12, D16, D22, D26, D66
-    cdef double w0_x, w0_y
-    cdef double ei0[3]
-    cdef double ej0[3]
-    cdef double ei[3]
-    cdef double ki0[3]
-    cdef double kj0[3]
-    cdef double ki[3]
-    cdef double ei00[3]
-    cdef double ej00[3]
-    cdef double Ni[3]
-    cdef double Ni0[3]
-    cdef double Ni00[3]
-    cdef np.ndarray[cDOUBLE, ndim=1] u0e, u0
-    cdef np.ndarray[cDOUBLE, ndim=2] eia0, eib0, eic0
-    cdef np.ndarray[cDOUBLE, ndim=2] eia, eib, eic, kia, kib, kic
-
-    cdef np.ndarray[cDOUBLE, ndim=2] Nia, Nib, Nic, Mia, Mib
-    cdef np.ndarray[cDOUBLE, ndim=2] Nia0, Nib0, Nic0, Mia0, Mib0
-
-    cdef double[:, :, :] eiab, eicd, eibd, eibc, eiad, eiac
-    cdef double[:, :, :] Niab, Niac, Niad, Nibc, Nibd, Nicd
-    cdef double[:, :, :] Miab, Miac, Miad, Mibc
-
-    eia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-
-    Nia = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Mia = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Nia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-    Mia0 = np.zeros((3, num_nodes*DOF), dtype=DOUBLE)
-
-    eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
-    Niab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
-    Miab = np.zeros((3, num_nodes*DOF, num_nodes*DOF), dtype=DOUBLE)
+        h_tow, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
+        ny_nx_aspect_ratio=1, cg_x0=None,
+        idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
+        koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
+        max_ny_nx_aspect_ratio=2, zero_offset=False):
 
     circ = 2*np.pi*R
     out = {}
 
-    assert thetadeg_c >= 0
+    assert nxt >= 2, 'At least two nodes are required in the transition zone.'
+    assert thetadeg_c1 >= 0
+    assert thetadeg_c2 >= 0
 
-    if param_n == 0 or param_f == 0:
-        print('# constant stiffness case')
-        assert ny is not None
-        nx = int(ny*L/circ)
-        if nx % 2 == 0:
-            nx += 1
-        xlin = np.linspace(0, L, nx)
-        thetalin = np.ones_like(xlin)*thetadeg_c
-        t = None
-        c = None
-        s = None
-
+    if param_n == 0:
+        c2 = 0
+        c1 = L
+        t = 0
+        if ny is not None:
+            nx = int(ny*L/circ)
+            if nx % 2 == 0:
+                nx += 1
+        else:
+            print('# assuming nx=nxt')
+            nx = nxt
+            ny = int(round(nx*circ/L*ny_nx_aspect_ratio, 0))
+        nxc = nx
+        nxs = 0
     else:
-        assert thetadeg_s > thetadeg_c, 'thetadeg_s must be larger than thetadeg_c'
-        t = rCTS*np.sin(np.deg2rad(thetadeg_s - thetadeg_c))
+        t = rCTS*np.sin(abs(np.deg2rad(thetadeg_c2 - thetadeg_c1)))
         nmax = L/(2*t)
         print('# nmax', nmax)
-        assert param_n <= nmax
-        cmax = (L - 2*t*param_n)/(param_n+1)
-        if not isclose(cmax, 0):
-            s = param_f/(param_n*(param_f + 1))*(L - 2*t*param_n)
-            c = 1/(param_f*param_n + param_f + param_n + 1)*(L-2*t*param_n)
-        else:
-            s = 0
-            c = 0
-        assert isclose((2*t + s)*param_n + c*(param_n+1) - L, 0)
-        print('# param_t', t)
-        print('# param_s', s)
-        print('# param_c', c)
-
+        if param_n > nmax:
+            print('# param_n changed from ', param_n)
+            print('#                 to   ', int(nmax))
+            param_n = int(nmax)
+        c2_max = (L - 2*t*param_n)/param_n
+        c2 = c2_ratio*c2_max
+        c1 = (L - (2*t + c2)*param_n)/(param_n + 1)
+        nxc = max(2, int(round(c1/t*nxt, 0)))
+        nxs = max(2, int(round(c2/t*nxt, 0)))
         dx = t/(nxt-1)
         if ny is None:
-            ny = int(round(circ/dx, 0))
-        nxc = max(2, int(round(c/t*nxt, 0)))
-        nxs = max(2, int(round(s/t*nxt, 0)))
-        print('# nxc', nxc)
-        print('# nxs', nxs)
-        xlin = np.linspace(0, c, nxc-1, endpoint=False)
-        thetalin = np.ones(nxc-1)*thetadeg_c
-        for i in range(param_n):
-            start = c + i*(c + 2*t + s)
-            xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
-            thetalin = np.concatenate((thetalin, thetadeg_c + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_s - thetadeg_c)))
-            if not isclose(s, 0):
-                xlin = np.concatenate((xlin, np.linspace(start+t, start+t+s, nxs-1, endpoint=False)))
-                thetalin = np.concatenate((thetalin, np.ones(nxs-1)*thetadeg_s))
-            xlin = np.concatenate((xlin, np.linspace(start+t+s, start+t+s+t, nxt-1, endpoint=False)))
-            thetalin = np.concatenate((thetalin, thetadeg_s + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c - thetadeg_s)))
-            if i == param_n-1:
-                endpoint = True
-                neff = nxc
-            else:
-                endpoint = False
-                neff = nxc-1
-            xlin = np.concatenate((xlin, np.linspace(start+t+s+t, start+t+s+t+c, neff, endpoint=endpoint)))
-            thetalin = np.concatenate((thetalin, np.ones(neff)*thetadeg_c))
+            ny = int(round(circ/dx*ny_nx_aspect_ratio, 0))
+        dy = circ/ny
+        if dy/dx > max_ny_nx_aspect_ratio:
+            dxtmp = dy/max_ny_nx_aspect_ratio
+            nxc = max(2, int(round(c1/dxtmp, 0)))
+            nxs = max(2, int(round(c2/dxtmp, 0)))
+    assert isclose((2*t + c2)*param_n + c1*(param_n+1) - L, 0)
+    print('# param_t', t)
+    print('# param_c1', c1)
+    print('# param_c2', c2)
+    print('# nxt', nxt)
+    print('# nxc', nxc)
+    print('# nxs', nxs)
+    if np.isclose(c1, 0):
+        xlin = []
+        thetalin = []
+    else:
+        ntmp = nxc-1
+        if isclose(c1/2, L/2) and (nxc % 2) != 0:
+            ntmp += 1
+        if param_n == 0:
+            endpoint = True
+        else:
+            endpoint = False
+        xlin = np.linspace(0, c1, ntmp, endpoint=endpoint)
+        thetalin = np.ones(ntmp)*thetadeg_c1
+    for i in range(param_n):
+        start = c1 + i*(c1 + 2*t + c2)
+        xlin = np.concatenate((xlin, np.linspace(start, start+t, nxt-1, endpoint=False)))
+        thetalin = np.concatenate((thetalin, thetadeg_c1 + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c2 - thetadeg_c1)))
+        if not isclose(c2, 0):
+            #NOTE to keep always a node in the middle of the cylinder
+            ntmp = nxs-1
+            if isclose(0.5*(start+t) + 0.5*(start+t+c2), L/2) and (nxs % 2) == 0:
+                ntmp += 1
+            xlin = np.concatenate((xlin, np.linspace(start+t, start+t+c2, ntmp, endpoint=False)))
+            thetalin = np.concatenate((thetalin, np.ones(ntmp)*thetadeg_c2))
+        if i == param_n-1 and np.isclose(c1, 0):
+            xlin = np.concatenate((xlin, np.linspace(start+t+c2, start+t+c2+t, nxt, endpoint=True)))
+            thetalin = np.concatenate((thetalin, thetadeg_c2 + np.linspace(0, 1, nxt, endpoint=True)*(thetadeg_c1 - thetadeg_c2)))
+        else:
+            xlin = np.concatenate((xlin, np.linspace(start+t+c2, start+t+c2+t, nxt-1, endpoint=False)))
+            thetalin = np.concatenate((thetalin, thetadeg_c2 + np.linspace(0, 1, nxt-1, endpoint=False)*(thetadeg_c1 - thetadeg_c2)))
+        if i == param_n-1:
+            endpoint = True
+            neff = nxc
+        else:
+            endpoint = False
+            neff = nxc-1
+        if not np.isclose(c1, 0):
+            ntmp = neff
+            if isclose(0.5*(start+t+c2+t) + 0.5*(start+t+c2+t+c1), L/2) and (nxc % 2) == 0:
+                ntmp += 1
+            xlin = np.concatenate((xlin, np.linspace(start+t+c2+t, start+t+c2+t+c1, ntmp, endpoint=endpoint)))
+            thetalin = np.concatenate((thetalin, np.ones(ntmp)*thetadeg_c1))
 
+    assert np.isclose(xlin.min(), 0)
+    assert np.isclose(xlin.max(), L)
     nx = xlin.shape[0]
+    out['nx'] = nx
+    out['ny'] = ny
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
     # closing the cylinder by reassigning last row of node-ids
@@ -180,7 +173,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     thetadegavg_elements = []
     havg_elements = []
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
-        elem = BFSCCylinder(nint)
+        elem = BFSCCylinderSanders(nint)
         elem.n1 = n1
         elem.n2 = n2
         elem.n3 = n3
@@ -208,7 +201,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 # Cylinders,” Compos. Struct., 260, p. 113445.
                 #NOTE in the idealistic_CTS, there is thickness increase only
                 #     when the steering occurs out of a reference angle
-                steering_angle = theta_local - thetadeg_c
+                steering_angle = theta_local - thetadeg_c1
             else:
                 #NOTE in the real CTS, there is thickness increase for any
                 #     angle other than 0, given that the shift direction is the
@@ -221,6 +214,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             plyts = (plyt_local, plyt_local)
 
             offset = sum(plyts)/2.
+            if zero_offset:
+                offset = 0
             prop = laminated_plate(stack=stack, plyts=plyts, laminaprop=laminaprop, offset=offset, rho=rho)
             for j in range(nint):
                 wj = weights[j]
@@ -265,7 +260,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     out['thetadegavg_elements'] = thetadegavg_elements
     out['havg_elements'] = havg_elements
     out['havg'] = havg
-    out['elements'] = elements
 
     if mesh_only:
         return out
@@ -276,6 +270,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for elem in elements:
         update_KC0(elem, points, weights, KC0r, KC0c, KC0v)
     KC0 = coo_matrix((KC0v, (KC0r, KC0c)), shape=(N, N)).tocsc()
+    del KC0v, KC0r, KC0c
+    gc.collect()
 
     print('# finished element assembly')
 
@@ -283,105 +279,171 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     bk = np.zeros(N, dtype=bool)
 
     checkSS = isclose(x, 0) | isclose(x, L)
-    bk[0::DOF] = checkSS
     bk[3::DOF] = checkSS
     bk[6::DOF] = checkSS
-    if clamped:
-        bk[7::DOF] = checkSS
+    check = isclose(x, L/2.) & isclose(y, 0)
+    assert check.sum() == 1
+    bk[0::DOF] = check
     bu = ~bk # same as np.logical_not, defining unknown DOFs
+    u0 = np.zeros(N, dtype=DOUBLE)
 
     print('# starting static analysis')
 
-    # axial compression applied at x=L
-    u0 = np.zeros(N, dtype=DOUBLE)
-
-    compression = -0.0005
-    checkTopEdge = isclose(x, L)
-    u0[0::DOF] += checkTopEdge*compression
-    uk = u0[bk]
+    # axially compressive load applied at x=0 and x=L
+    fext = np.zeros(N)
+    # applying load
+    for elem in elements:
+        pos1 = nid_pos[elem.n1]
+        pos2 = nid_pos[elem.n2]
+        pos3 = nid_pos[elem.n3]
+        pos4 = nid_pos[elem.n4]
+        if isclose(x[pos3], L):
+            Nxx = -Nxxunit
+            xi = +1
+        elif isclose(x[pos1], 0):
+            Nxx = +Nxxunit
+            xi = -1
+        else:
+            continue
+        lex = elem.lex
+        ley = elem.ley
+        indices = []
+        c1 = DOF*pos1
+        c2 = DOF*pos2
+        c3 = DOF*pos3
+        c4 = DOF*pos4
+        cs = [c1, c2, c3, c4]
+        for ci in cs:
+            for i in range(DOF):
+                indices.append(ci + i)
+        fe = np.zeros(num_nodes*DOF, dtype=float)
+        for j in range(nint):
+            eta = points[j]
+            elem.update_Nu(xi, eta)
+            fe += ley/2.*weights[j]*elem.Nu*Nxx
+        fext[indices] += fe
+    assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
     KC0uu = KC0[bu, :][:, bu]
-    KC0uk = KC0[bu, :][:, bk]
-    KC0kk = KC0[bk, :][:, bk]
-
-    fu = -KC0uk*uk
-
-    Nu = N - bk.sum()
-
-    # solving
-    PREC = 1./KC0uu.diagonal().max()
-
-    uu, info = cg(PREC*KC0uu, PREC*fu, x0=cg_x0, atol=0)
-    if info != 0:
-        print('#   failed with cg()')
-        print('#   trying spsolve()')
-        uu = spsolve(KC0uu, fu)
-    cg_x0 = uu.copy()
-
-    u0[bu] = uu
-
-    print('# finished static analysis')
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+
+    # solving
+    uu = spsolve(KC0uu, fext[bu])
+    cg_x0 = uu.copy()
+
+    u0[bu] = uu
+
+    if NLprebuck:
+        print('#    initiating nonlinear pre-buckling state')
+        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+
+        def calc_KT(u, KCNLv, KGv):
+            KCNLv *= 0
+            KGv *= 0
+            for elem in elements:
+                update_KCNL(u, elem, points, weights, KCNLr, KCNLc, KCNLv)
+                update_KG(u, elem, points, weights, KGr, KGc, KGv)
+            KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+            KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
+            return KC0 + KCNL + KG
+
+        def calc_fint(u, fint):
+            fint *= 0
+            for elem in elements:
+                update_fint(u, elem, points, weights, fint)
+            return fint
+
+        # solving using Modified Newton-Raphson method
+        def scaling(vec, D):
+            """
+                A. Peano and R. Riccioni, Automated discretisatton error
+                control in finite element analysis. In Finite Elements m
+                the Commercial Enviror&ent (Editei by J. 26.  Robinson),
+                pp. 368-387. Robinson & Assoc., Verwood.  England (1978)
+            """
+            return np.sqrt((vec*np.abs(1/D))@vec)
+
+        iteration = 0
+        fint = np.zeros(N)
+        fint = calc_fint(u0, fint)
+        Ri = fint - fext
+        du = np.zeros(N)
+        ui = u0.copy()
+        epsilon = 1.e-4
+        KT = calc_KT(u0, KCNLv, KGv)
+        KTuu = KT[bu, :][:, bu]
+        D = KC0uu.diagonal() # at beginning of load increment
+        while True:
+            print('#    iteration', iteration)
+            duu = spsolve(KTuu, -Ri[bu])
+            du[bu] = duu
+            u = ui + du
+            fint = calc_fint(u, fint)
+            Ri = fint - fext
+            crisfield_test = scaling(Ri[bu], D)/max(scaling(fext[bu], D), scaling(fint[bu], D))
+            print('#        crisfield_test, max(R)', crisfield_test, np.abs(Ri).max())
+            if crisfield_test < epsilon:
+                print('#    converged')
+                break
+            iteration += 1
+            KT = calc_KT(u, KCNLv, KGv)
+            KTuu = KT[bu, :][:, bu]
+            ui = u.copy()
+        u0 = u.copy()
+
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        del KCNLv, KCNLr, KCNLc
+        gc.collect()
+
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    else:
+        KC = KC0
+        KCuu = KC0uu
+
+    print('# finished static analysis')
+
+    #NOTE u0 represents the latest linear or nonlinear pre-buckling state
+
+    KGv *= 0
     for elem in elements:
         update_KG(u0, elem, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
     KGuu = KG[bu, :][:, bu]
 
-    # A * x[i] = lambda[i] * M * x[i]
-    #NOTE this works and seems to be the fastest option
+    print('# starting eigenvalue analysis')
+    #eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
+            #tol=1e-8, sigma=1., mode='buckling')
+    #load_mult = eigvals
+    eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
+            tol=1e-6)
+    load_mult = -1/eigvals
+    print('# finished eigenvalue analysis')
 
-    print('# starting spilu')
-    PREC2 = spilu(PREC*KC0uu, diag_pivot_thresh=0, drop_tol=1e-8,
-            fill_factor=50)
-    print('# finished spilu')
-    def matvec(x):
-        return PREC2.solve(x)
-    Kuuinv = LinearOperator(matvec=matvec, shape=(Nu, Nu))
-
-    print('# starting linear buckling analysis')
-
-    maxiter = 1000
-    if lobpcg_X is None:
-        Xu = np.random.rand(Nu, num_eigvals)
-        Xu /= np.linalg.norm(Xu, axis=0)
-    else:
-        Xu = lobpcg_X
-
-    #NOTE default tolerance is too large
-    tol = 1e-5
-    eigvals, eigvecsu, hist = lobpcg(A=PREC*KC0uu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
-            maxiter=maxiter, retResidualNormsHistory=True, tol=tol)
-    load_mult = eigvals
-    if not len(hist) <= maxiter:
-        print('#   failed with lobpcg()')
-        print('#   trying eigsh()')
-        eigvals, eigvecsu = eigsh(A=KC0uu, k=num_eigvals, which='SM', M=KGuu,
-                tol=1e-7, sigma=1., mode='buckling')
-        load_mult = -eigvals
-
-    print('# finished linear buckling analysis')
-
-    force = np.zeros(N)
-    fk = KC0uk.T*uu + KC0kk*uk
-    force[bk] = fk
-    Pcr = load_mult[0]*(force[0::DOF][checkTopEdge]).sum()
+    Pcr = load_mult[0]*Nxxunit*circ
+    print('# load_mult', load_mult)
     print('# critical buckling load', Pcr)
 
-    out['P0'] = Pcr/load_mult[0]
     out['Pcr'] = Pcr
     out['cg_x0'] = cg_x0
-    out['lobpcg_X'] = Xu
-    out['eigvals'] = load_mult
+    out['eigvals'] = eigvals
+    out['load_mult'] = load_mult
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
     out['t'] = t
-    out['s'] = s
-    out['c'] = c
+    out['c1'] = c1
+    out['c2'] = c2
     out['koiter'] = None
 
     if koiter_num_modes == 0:
@@ -389,7 +451,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     lambda_a = {}
     for modei in range(koiter_num_modes):
-        lambda_a[modei] = eigvals[modei]
+        lambda_a[modei] = load_mult[modei]
 
     es = partial(np.einsum, optimize='greedy', casting='no')
 
@@ -410,7 +472,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     phi30e_ab = {}
     phi20e_a = {}
     phi20_a = {}
-    phi2 = np.zeros((N, N))
+    #phi2 = np.zeros((N, N))
     phi200_ab = {}
     for modei in range(koiter_num_modes):
         phi20_a[modei] = np.zeros(N)
@@ -422,12 +484,22 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             phi3e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
             phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
 
+
+    #NOTE I noticed that, in order to get DIANA's result, the linear
+    #     pre-buckling state ignores all nonlinear quantities in the
+    #     calculations of the strains and its derivatives
+    #     Therefore, I am using this pythflag that multiply the referred nonlinear
+    #     terms
+    flag = NLprebuck
+
     # higher-order tensors for elements
 
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
     for count, elem in enumerate(elements):
         if count % (num_elements//5) == 0:
             print('#    count', count+1, num_elements)
+        eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
+
         c1 = elem.c1
         c2 = elem.c2
         c3 = elem.c3
@@ -452,8 +524,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         ube = uce = ude = uae
 
         indices = []
-        rows = []
-        cols = []
         cs = [c1, c2, c3, c4]
         for ci in cs:
             for i in range(DOF):
@@ -468,12 +538,25 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 phi3e_ab[(modei, modej)] *= 0
                 phi30e_ab[(modei, modej)] *= 0
 
-        phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
+        #phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
 
         for i in range(nint):
             xi = points[i]
             weight_xi = weights[i]
             for j in range(nint):
+                #TODO use Cython later
+                Aij = np.array([
+                    [elem.A11[i, j], elem.A12[i, j], elem.A16[i, j]],
+                    [elem.A12[i, j], elem.A22[i, j], elem.A26[i, j]],
+                    [elem.A16[i, j], elem.A26[i, j], elem.A66[i, j]]])
+                Bij = np.array([
+                    [elem.B11[i, j], elem.B12[i, j], elem.B16[i, j]],
+                    [elem.B12[i, j], elem.B22[i, j], elem.B26[i, j]],
+                    [elem.B16[i, j], elem.B26[i, j], elem.B66[i, j]]])
+                #Dij = np.array([
+                    #[elem.D11[i, j], elem.D12[i, j], elem.D16[i, j]],
+                    #[elem.D12[i, j], elem.D22[i, j], elem.D26[i, j]],
+                    #[elem.D16[i, j], elem.D26[i, j], elem.D66[i, j]]])
                 eta = points[j]
                 weight_eta = weights[j]
                 weight = weight_xi * weight_eta
@@ -483,135 +566,70 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 elem.update_Bm(xi, eta)
                 elem.update_Bb(xi, eta)
 
-                w0_x = 0
-                w0_y = 0
-                for k in range(40):
-                    w0_x += elem.Nw_x[k]*u0e[k]
-                    w0_y += elem.Nw_y[k]*u0e[k]
-                for k in range(40):
-                    eia0[0, k] = w0_x*elem.Nw_x[k]
-                    eia0[1, k] = w0_y*elem.Nw_y[k]
-                    eia0[2, k] = w0_x*elem.Nw_y[k] + w0_y*elem.Nw_x[k]
-                eib0 = eic0 = eia0
+                Nw_x = np.atleast_2d(elem.Nw_x)
+                Nw_y = np.atleast_2d(elem.Nw_y)
 
-                for k in range(3):
-                    ei0[k] = 0
-                    ki0[k] = 0
-                    for m in range(40):
-                        ei0[k] += elem.Bm[k, m]*u0e[m] #NOTE ignoring NL terms
-                        ki0[k] += elem.Bb[k, m]*u0e[m]
-                    #TODO why lambda_i[0]?
-                    ej0[k] = ei0[k]
-                    kj0[k] = ki0[k]
-                    ei[k] = ei0[k]*lambda_a[0]
-                    ki[k] = ki0[k]*lambda_a[0]
+                w0_x = Nw_x[0] @ u0e
+                w0_y = Nw_y[0] @ u0e
 
-                ei00[0] = ej00[0] = w0_x**2
-                ei00[1] = ej00[1] = w0_y**2
-                ei00[2] = ej00[2] = 2*w0_x*w0_y
+                Bm = np.asarray(elem.Bm)
+                Bb = np.asarray(elem.Bb)
 
-                ki00 = 0
+                #NOTE, added NL terms
+                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*w0_x**2,
+                                                      lambda_a[0]*w0_y**2,
+                                                      lambda_a[0]*2*w0_x*w0_y])
+                ki0 = kj0 = Bb @ u0e
 
-                A11 = elem.A11[i, j]
-                A12 = elem.A12[i, j]
-                A16 = elem.A16[i, j]
-                A22 = elem.A22[i, j]
-                A26 = elem.A26[i, j]
-                A66 = elem.A66[i, j]
-                B11 = elem.B11[i, j]
-                B12 = elem.B12[i, j]
-                B16 = elem.B16[i, j]
-                B22 = elem.B22[i, j]
-                B26 = elem.B26[i, j]
-                B66 = elem.B66[i, j]
-                D11 = elem.D11[i, j]
-                D12 = elem.D12[i, j]
-                D16 = elem.D16[i, j]
-                D22 = elem.D22[i, j]
-                D26 = elem.D26[i, j]
-                D66 = elem.D66[i, j]
+                ##TODO why lambda_i[0]?
+                #ei = ei0*lambda_a[0]
+                #ki = ki0*lambda_a[0]
 
-                Ni0[0] = (A11*ej0[0] * A12*ej0[1] + A16*ej0[2]
-                        + B11*kj0[0] * B12*kj0[1] + B16*kj0[2])
-                Ni0[1] = (A12*ej0[0] * A22*ej0[1] + A26*ej0[2]
-                        + B12*kj0[0] * B22*kj0[1] + B26*kj0[2])
-                Ni0[2] = (A16*ej0[0] * A26*ej0[1] + A66*ej0[2]
-                        + B16*kj0[0] * B26*kj0[1] + B66*kj0[2])
+                ei00 = ej00 = flag*np.array([w0_x**2,
+                                             w0_y**2,
+                                             2*w0_x*w0_y])
 
-                #TODO why lambda_a[0]?
-                Ni[0] = Ni0[0]*lambda_a[0]
-                Ni[1] = Ni0[1]*lambda_a[0]
-                Ni[2] = Ni0[2]*lambda_a[0]
+                Ni0 = Aij@ej0 + Bij@kj0
+                Ni00 = Aij@ej00
 
-                Ni00[0] = A11*ej00[0] * A12*ej00[1] + A16*ej00[2]
-                Ni00[1] = A12*ej00[0] * A22*ej00[1] + A26*ej00[2]
-                Ni00[2] = A16*ej00[0] * A26*ej00[1] + A66*ej00[2]
+                ##TODO why lambda_a[0]?
+                #Ni = Ni0*lambda_a[0]
 
-                eia = eib = eic = np.asarray(elem.Bm) #NOTE ignoring NL terms
-                kia = kib = kic = np.asarray(elem.Bb)
+                #NOTE, added NL terms
+                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Nw_x[0],
+                                                                  w0_y*Nw_y[0],
+                                                                  w0_x*Nw_y[0] + w0_y*Nw_x[0]])
 
-                Nia *= 0
-                Mia *= 0
-                Nia0 *= 0
-                Mia0 *= 0
-                for m in range(num_nodes*DOF):
-                    Nia[0, m] += (A11*eia[0, m] + A12*eia[1, m] + A16*eia[2, m]
-                                + B11*kia[0, m] + B12*kia[1, m] + B16*kia[2, m])
-                    Nia[1, m] += (A12*eia[0, m] + A22*eia[1, m] + A26*eia[2, m]
-                                + B12*kia[0, m] + B22*kia[1, m] + B26*kia[2, m])
-                    Nia[2, m] += (A16*eia[0, m] + A26*eia[1, m] + A66*eia[2, m]
-                                + B16*kia[0, m] + B26*kia[1, m] + B66*kia[2, m])
-                    Mia[0, m] += (B11*eia[0, m] + B12*eia[1, m] + B16*eia[2, m]
-                                + D11*kia[0, m] + D12*kia[1, m] + D16*kia[2, m])
-                    Mia[1, m] += (B12*eia[0, m] + B22*eia[1, m] + B26*eia[2, m]
-                                + D12*kia[0, m] + D22*kia[1, m] + D26*kia[2, m])
-                    Mia[2, m] += (B16*eia[0, m] + B26*eia[1, m] + B66*eia[2, m]
-                                + D16*kia[0, m] + D26*kia[1, m] + D66*kia[2, m])
+                kia = kib = kic = Bb
 
-                    Nia0[0, m] += A11*eia0[0, m] + A12*eia0[1, m] + A16*eia0[2, m]
-                    Nia0[1, m] += A12*eia0[0, m] + A22*eia0[1, m] + A26*eia0[2, m]
-                    Nia0[2, m] += A16*eia0[0, m] + A26*eia0[1, m] + A66*eia0[2, m]
-                    Mia0[0, m] += B11*eia0[0, m] + B12*eia0[1, m] + B16*eia0[2, m]
-                    Mia0[1, m] += B12*eia0[0, m] + B22*eia0[1, m] + B26*eia0[2, m]
-                    Mia0[2, m] += B16*eia0[0, m] + B26*eia0[1, m] + B66*eia0[2, m]
-                Nib = Nic = Nia
-                Mib = Mia
+                Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
+                #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                Nib0 = Nic0 = Nia0
-                Mib0 = Mia0
+                eia0 = eib0 = eic0 = flag*np.array([w0_x*Nw_x[0],
+                                                    w0_y*Nw_y[0],
+                                                    w0_x*Nw_y[0] + w0_y*Nw_x[0]])
 
-                #eiab[0, :, :] = es('i,j->ij', elem.Nw_x, elem.Nw_x, out=eiab[0])
-                #eiab[1, :, :] = es('i,j->ij', elem.Nw_y, elem.Nw_y, out=np.asarray(eiab[1]))
-                #eiab[2, :, :] = es('i,j->ij', elem.Nw_x, elem.Nw_y) + es('i,j->ij', elem.Nw_y, elem.Nw_x)
-                es('i,j->ij', elem.Nw_x, elem.Nw_x, out=np.asarray(eiab[0]))
-                es('i,j->ij', elem.Nw_y, elem.Nw_y, out=np.asarray(eiab[1]))
-                es('i,j->ij', elem.Nw_x, elem.Nw_y, out=np.asarray(eiab[2]))
-                es('i,j->ij', elem.Nw_y, elem.Nw_x, out=np.asarray(eiab[2]))
+                Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
+                Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
+
+                eiab[0] = Nw_x.T @ Nw_x
+                eiab[1] = Nw_y.T @ Nw_y
+                eiab[2] = Nw_x.T @ Nw_y + Nw_y.T @ Nw_x
+
                 eicd = eibd = eibc = eiad = eiac = eiab
 
-                Niab[...] = 0
-                Miab[...] = 0
-                for m in range(num_nodes*DOF):
-                    for n in range(num_nodes*DOF):
-                        Niab[0, m, n] += A11*eiab[0, m, n] + A12*eiab[1, m, n] + A16*eiab[2, m, n]
-                        Niab[1, m, n] += A12*eiab[0, m, n] + A22*eiab[1, m, n] + A26*eiab[2, m, n]
-                        Niab[2, m, n] += A16*eiab[0, m, n] + A26*eiab[1, m, n] + A66*eiab[2, m, n]
-                        Miab[0, m, n] += B11*eiab[0, m, n] + B12*eiab[1, m, n] + B16*eiab[2, m, n]
-                        Miab[1, m, n] += B12*eiab[0, m, n] + B22*eiab[1, m, n] + B26*eiab[2, m, n]
-                        Miab[2, m, n] += B16*eiab[0, m, n] + B26*eiab[1, m, n] + B66*eiab[2, m, n]
+                Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
+                Miab = Miac = Mibc = es('ij,jab->iab', Bij, eiab)
 
-                Niac = Niad = Nibc = Nibd = Nicd = Niab
-                Miac = Miad = Mibc = Miab
-
-                phi2e += 1/2.*weight*(lex*ley/4.)*(
-                             es('iab,i->ab', Niab, ei)
-                           + es('ia,ib->ab', Nia, eib)
-                           + es('ib,ia->ab', Nib, eia)
-                           + es('i,iab->ab', Ni, eiab)
-                           + es('iab,i->ab', Miab, ki)
-                           + es('ia,ib->ab', Mia, kib)
-                           + es('ib,ia->ab', Mib, kia)
-                        )
+                #phi2e += 1/2.*weight*(lex*ley/4.)*(
+                           #  es('iab,i->ab', Niab, ei) #NOTE this is KG
+                           #+ es('ia,ib->ab', Nia, eib)
+                           #+ es('ib,ia->ab', Nib, eia)
+                           #+ es('i,iab->ab', Ni, eiab) #NOTE this is KG
+                           #+ es('iab,i->ab', Miab, ki) #NOTE this is KG
+                           #+ es('ia,ib->ab', Mia, kib)
+                           #+ es('ib,ia->ab', Mib, kia)
+                        #)
 
                 for modei in range(koiter_num_modes):
                     ua1 = uae[modei]
@@ -673,16 +691,34 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                             for model in range(koiter_num_modes):
                                 phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
 
-        tmp = np.zeros((N, num_nodes*DOF))
-        tmp[indices] = phi2e
-        phi2[:, indices] += tmp
+        #tmp = np.zeros((N, num_nodes*DOF))
+        #tmp[indices] = phi2e
+        #phi2[:, indices] += tmp
         for modei in range(koiter_num_modes):
             phi20_a[modei][indices] += phi20e_a[modei]
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    phi2uu = phi2[bu, :][:, bu]
+    #TODO phi2uu = phi2[bu, :][:, bu]
+    #if NLprebuck:
+        #phi2 = KC + KG #TODO with KG?
+        #phi2uu = KCuu + KGuu #TODO with KGuu?
+    #else:
+    if flag == 1:
+        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
+        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
+        KCNLv *= 0
+        for elem in elements:
+            update_KCNL(u0*lambda_a[0], elem, points, weights, KCNLr, KCNLc, KCNLv)
+        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+        KC = KC0 + KCNL
+        KCuu = KC[bu, :][:, bu]
+
+    #NOTE I checked and phi2 can be really defined using K + KNL + KG
+    phi2 = KC + KG*lambda_a[0]
+    phi2uu = KCuu + KGuu*lambda_a[0]
 
     phi2_ab = {}
     for modei in range(koiter_num_modes):
@@ -716,7 +752,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(csc_matrix(phi2uu), force2ndorder_ij[(modei, modej)][bu])
+            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
             uab[(modei, modej)] = uijbar.copy()
             # Gram-Schmidt orthogonalization
             #NOTE uab are orthogonal to all buckling modes, but not mutually

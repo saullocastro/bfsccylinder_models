@@ -12,7 +12,7 @@ def test_pm45():
     L = 0.3 # m
     R = 0.136/2 # m
 
-    ny = 40
+    ny = 30
 
     E11 = 90e9
     E22 = 7e9
@@ -48,7 +48,7 @@ def test_2_runs_in_seq():
     L = 1.1 # m
     R = 0.3 # m
 
-    ny = 40
+    ny = 30
 
     E11 = 90e9
     E22 = 7e9

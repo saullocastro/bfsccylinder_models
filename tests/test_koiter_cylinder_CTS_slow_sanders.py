@@ -7,8 +7,8 @@ from composites import laminated_plate
 
 from bfsccylinder_models.models import linBuck_VAFW
 from bfsccylinder_models.vatfunctions import func_VAT_P_x
-from bfsccylinder_models.koiter_cylinder_CTS_slow import fkoiter_cylinder_CTS_circum
-from bfsccylinder_models.koiter_cylinder_newton_raphson import fkoiter_cyl_SS3
+from bfsccylinder_models.koiter_cylinder_CTS_slow_sanders import fkoiter_cylinder_CTS_circum
+from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3
 
 def test_pm45():
     L = 0.3 # m
@@ -36,7 +36,7 @@ def test_pm45():
     out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
             num_eigvals=5, koiter_num_modes=1, Nxxunit=Nxxunit, idealistic_CTS=True,
-            NLprebuck=NLprebuck)
+            NLprebuck=NLprebuck, zero_offset=False)
     print('cylinder_CTS eigvals', out1['eigvals'])
     print('cylinder_CTS koiter', out1['koiter'])
 
