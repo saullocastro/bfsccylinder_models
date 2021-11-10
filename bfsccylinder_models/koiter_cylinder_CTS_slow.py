@@ -25,8 +25,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
-        max_ny_nx_aspect_ratio=2, zero_offset=False):
+        max_ny_nx_aspect_ratio=2, zero_offset=False,
+        c1_threshold_factor=0.01, c2_threshold_factor=0.01):
 
+    c1_threshold = c1_threshold_factor*L
+    c2_threshold = c2_threshold_factor*L
     circ = 2*np.pi*R
     out = {}
 
@@ -58,7 +61,15 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             param_n = int(nmax)
         c2_max = (L - 2*t*param_n)/param_n
         c2 = c2_ratio*c2_max
+        if c2 < c2_threshold:
+            c2 = 0
         c1 = (L - (2*t + c2)*param_n)/(param_n + 1)
+        if c1 < c1_threshold:
+            c1 = 0
+        #NOTE recalculating t to accomodate cases where
+        #     c1 < c1_threshold or c2 < c2_threshold
+        t = ((L - c1*(param_n+1))/param_n - c2)/2
+
         nxc = max(2, int(round(c1/t*nxt, 0)))
         nxs = max(2, int(round(c2/t*nxt, 0)))
         dx = t/(nxt-1)
@@ -124,6 +135,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     nx = xlin.shape[0]
     out['nx'] = nx
     out['ny'] = ny
+    out['xlin'] = xlin
+    out['thetalin'] = thetalin
     nids = 1 + np.arange(nx*(ny+1))
     nids_mesh = nids.reshape(nx, ny+1)
     # closing the cylinder by reassigning last row of node-ids
