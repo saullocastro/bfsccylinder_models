@@ -63,6 +63,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         c2 = c2_ratio*c2_max
         if c2 < c2_threshold:
             c2 = 0
+            c2_ratio = 0
         c1 = (L - (2*t + c2)*param_n)/(param_n + 1)
         if c1 < c1_threshold:
             c1 = 0
@@ -87,6 +88,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# nxt', nxt)
     print('# nxc', nxc)
     print('# nxs', nxs)
+    print('# rCTS', rCTS)
+    print('# param_n', param_n)
+    print('# c2_ratio', c2_ratio)
+    print('# thetadeg_c1', thetadeg_c1)
+    print('# thetadeg_c2', thetadeg_c2)
     if np.isclose(c1, 0):
         xlin = []
         thetalin = []
@@ -458,6 +464,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
+    out['rCTS'] = rCTS
+    out['param_n'] = param_n
+    out['c2_ratio'] = c2_ratio
+    out['thetadeg_c1'] = thetadeg_c1
+    out['thetadeg_c2'] = thetadeg_c2
     out['t'] = t
     out['c1'] = c1
     out['c2'] = c2
