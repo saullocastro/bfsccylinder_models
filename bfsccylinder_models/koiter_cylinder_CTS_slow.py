@@ -152,6 +152,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     n2s = nids_mesh[1:, :j].flatten()
     n3s = nids_mesh[1:, 1:].flatten()
     n4s = nids_mesh[:i, 1:].flatten()
+    out['n1s'] = n1s
+    out['n2s'] = n2s
+    out['n3s'] = n3s
+    out['n4s'] = n4s
 
     points, weights = get_points_weights(nint=nint)
 
