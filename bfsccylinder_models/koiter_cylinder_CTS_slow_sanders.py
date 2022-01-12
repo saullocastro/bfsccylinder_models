@@ -37,7 +37,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     assert thetadeg_c1 >= 0
     assert thetadeg_c2 >= 0
 
-    if param_n == 0:
+    if param_n == 0 or isclose(thetadeg_c1, thetadeg_c2):
+        print('# constant stiffness')
+        param_n = 0
         c2 = 0
         c1 = L
         t = 0
@@ -81,7 +83,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             dxtmp = dy/max_ny_nx_aspect_ratio
             nxc = max(2, int(round(c1/dxtmp, 0)))
             nxs = max(2, int(round(c2/dxtmp, 0)))
-    assert isclose((2*t + c2)*param_n + c1*(param_n+1) - L, 0)
     print('# param_t', t)
     print('# param_c1', c1)
     print('# param_c2', c2)
@@ -93,6 +94,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# c2_ratio', c2_ratio)
     print('# thetadeg_c1', thetadeg_c1)
     print('# thetadeg_c2', thetadeg_c2)
+    assert isclose((2*t + c2)*param_n + c1*(param_n+1) - L, 0)
     if np.isclose(c1, 0):
         xlin = []
         thetalin = []
@@ -184,6 +186,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# number of elements', num_elements)
 
     elements = []
+    connectivity = []
     N = DOF*nx*ny
     print('# numbers of DOF', N)
     laminaprop = (E11, E22, nu12, G12, G12, G12)
@@ -275,9 +278,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         init_k_KCNL += KCNL_SPARSE_SIZE
         init_k_KG += KG_SPARSE_SIZE
         elements.append(elem)
+        connectivity.append([n1, n2, n3, n4])
 
     havg_elements = np.asarray(havg_elements)
     havg = havg_elements.mean()
+    out['connectivity'] = connectivity
     out['volume'] = volume
     out['mass'] = mass
     out['thetadegavg_elements'] = thetadegavg_elements
