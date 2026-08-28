@@ -2,6 +2,6 @@ bfsccylinder
 numpy
 scipy
 composites
-coveralls
+coverage
 pytest
 pytest-cov
