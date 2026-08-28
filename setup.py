@@ -11,7 +11,7 @@ from Cython.Build import cythonize
 
 
 is_released = True
-version = '0.2.34'
+version = '0.2.35'
 
 
 def git_version():
@@ -80,11 +80,12 @@ Intended Audience :: Science/Research
 Intended Audience :: Developers
 Topic :: Scientific/Engineering :: Mathematics
 Topic :: Education
-License :: OSI Approved :: BSD License
-Programming Language :: Python :: 3.6
-Programming Language :: Python :: 3.7
-Programming Language :: Python :: 3.8
 Programming Language :: Python :: 3.9
+Programming Language :: Python :: 3.10
+Programming Language :: Python :: 3.11
+Programming Language :: Python :: 3.12
+Programming Language :: Python :: 3.13
+Programming Language :: Python :: 3.14
 Operating System :: Microsoft :: Windows
 Operating System :: Unix
 
@@ -103,32 +104,11 @@ if 'CYTHON_TRACE_NOGIL' in os.environ.keys():
     compile_args = ['-O0']
     link_args = []
 
-include_dirs = [
-            np.get_include(),
-            ]
-
 extensions = [
     Extension('bfsccylinder_models.linbuck_VAFW',
         sources=[
             './bfsccylinder_models/linbuck_VAFW.pyx',
             ],
-        include_dirs=include_dirs,
-        extra_compile_args=compile_args,
-        extra_link_args=link_args,
-        language='c++'),
-    Extension('bfsccylinder_models.koiter_cylinder_CTS',
-        sources=[
-            './bfsccylinder_models/koiter_cylinder_CTS.pyx',
-            ],
-        include_dirs=include_dirs,
-        extra_compile_args=compile_args,
-        extra_link_args=link_args,
-        language='c++'),
-    Extension('bfsccylinder_models.koiter_cylinder',
-        sources=[
-            './bfsccylinder_models/koiter_cylinder.pyx',
-            ],
-        include_dirs=include_dirs,
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         language='c++'),
