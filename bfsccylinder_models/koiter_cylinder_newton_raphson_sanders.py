@@ -163,8 +163,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         fe = np.zeros(num_nodes*DOF, dtype=float)
         for j in range(nint):
             eta = points[j]
-            elem.update_Nu(xi, eta)
-            fe += ley/2.*weights[j]*elem.Nu*Nxx
+            elem.update_Su(xi, eta)
+            fe += ley/2.*weights[j]*elem.Su*Nxx
         fext[indices] += fe
     assert isclose(fext.sum(), 0)
 
@@ -396,16 +396,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 weight_eta = weights[j]
                 weight = weight_xi * weight_eta
 
-                elem.update_Nw_x(xi, eta)
-                elem.update_Nw_y(xi, eta)
+                elem.update_Sw_x(xi, eta)
+                elem.update_Sw_y(xi, eta)
                 elem.update_Bm(xi, eta)
                 elem.update_Bb(xi, eta)
 
-                Nw_x = np.atleast_2d(elem.Nw_x)
-                Nw_y = np.atleast_2d(elem.Nw_y)
+                Sw_x = np.atleast_2d(elem.Sw_x)
+                Sw_y = np.atleast_2d(elem.Sw_y)
 
-                w0_x = Nw_x[0] @ u0e
-                w0_y = Nw_y[0] @ u0e
+                w0_x = Sw_x[0] @ u0e
+                w0_y = Sw_y[0] @ u0e
 
                 Bm = np.asarray(elem.Bm)
                 Bb = np.asarray(elem.Bb)
@@ -431,25 +431,25 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 #Ni = Ni0*lambda_a[0]
 
                 #NOTE, added NL terms
-                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Nw_x[0],
-                                                                  w0_y*Nw_y[0],
-                                                                  w0_x*Nw_y[0] + w0_y*Nw_x[0]])
+                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Sw_x[0],
+                                                                  w0_y*Sw_y[0],
+                                                                  w0_x*Sw_y[0] + w0_y*Sw_x[0]])
 
                 kia = kib = kic = Bb
 
                 Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
                 #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                eia0 = eib0 = eic0 = flag*np.array([w0_x*Nw_x[0],
-                                                    w0_y*Nw_y[0],
-                                                    w0_x*Nw_y[0] + w0_y*Nw_x[0]])
+                eia0 = eib0 = eic0 = flag*np.array([w0_x*Sw_x[0],
+                                                    w0_y*Sw_y[0],
+                                                    w0_x*Sw_y[0] + w0_y*Sw_x[0]])
 
                 Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
                 Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
 
-                eiab[0] = Nw_x.T @ Nw_x
-                eiab[1] = Nw_y.T @ Nw_y
-                eiab[2] = Nw_x.T @ Nw_y + Nw_y.T @ Nw_x
+                eiab[0] = Sw_x.T @ Sw_x
+                eiab[1] = Sw_y.T @ Sw_y
+                eiab[2] = Sw_x.T @ Sw_y + Sw_y.T @ Sw_x
 
                 eicd = eibd = eibc = eiad = eiac = eiab
 
