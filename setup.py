@@ -4,10 +4,6 @@ import os
 import inspect
 import subprocess
 from setuptools import setup, find_packages
-from distutils.extension import Extension
-
-import numpy as np
-from Cython.Build import cythonize
 
 
 is_released = True
@@ -93,32 +89,6 @@ Operating System :: Unix
 
 fullversion = write_version_py(version, is_released)
 
-if os.name == 'nt':
-    compile_args = ['/openmp', '/O2']
-    link_args = []
-else:
-    compile_args = ['-fopenmp', '-static', '-static-libgcc', '-static-libstdc++']
-    link_args = ['-fopenmp', '-static-libgcc', '-static-libstdc++']
-
-if 'CYTHON_TRACE_NOGIL' in os.environ.keys():
-    compile_args = ['-O0']
-    link_args = []
-
-extensions = [
-    Extension('bfsccylinder_models.linbuck_VAFW',
-        sources=[
-            './bfsccylinder_models/linbuck_VAFW.pyx',
-            ],
-        extra_compile_args=compile_args,
-        extra_link_args=link_args,
-        language='c++'),
-    ]
-
-ext_modules = cythonize(extensions,
-        compiler_directives={'linetrace': True},
-        language_level = '3',
-        )
-
 data_files = [('', [
         'README.md',
         'LICENSE',
@@ -137,8 +107,6 @@ s = setup(
     long_description=read('README.md'),
     classifiers=[_f for _f in CLASSIFIERS.split('\n') if _f],
     install_requires=install_requires,
-    ext_modules = ext_modules,
     include_package_data=True,
     packages=find_packages(),
 )
-

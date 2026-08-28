@@ -24,8 +24,7 @@ jobs:
         pip install --upgrade -r requirements.txt
     - name: Install module
       run: |
-        export CYTHON_TRACE_NOGIL=1
-        python setup.py build_ext --inplace --define CYTHON_TRACE_NOGIL
+        pip install -e .
     - name: Test with pytest and coverage report
       run: |
         coverage run -m py.test tests
