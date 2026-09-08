@@ -35,7 +35,12 @@ def test_Sun_et_al():
     print('normalized buckling load', out['Pcr']/Ncl)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    assert np.isclose(b_1111, -0.04192599251428145, rtol=0.02)
+    #NOTE this case runs the SANDERS model with NLprebuck=True. The reference
+    #     was updated after fixing eps''_ab, eps_dot, eps_dot_dot and
+    #     eps_dot'_a, which were falling back to von Karman kinematics (Eqs.
+    #     40-43 of the SciTech 2022 paper). Regression value, no external
+    #     reference available for this configuration.
+    assert np.isclose(b_1111, -0.03936146987277212, rtol=0.02)
 
 
 def test_Arbocz_Starnes_2002():
