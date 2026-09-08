@@ -596,31 +596,45 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
                 elem.update_Sw_x(xi, eta)
                 elem.update_Sw_y(xi, eta)
+                elem.update_Sv(xi, eta)
                 elem.update_Bm(xi, eta)
                 elem.update_Bb(xi, eta)
 
                 Sw_x = np.atleast_2d(elem.Sw_x)
                 Sw_y = np.atleast_2d(elem.Sw_y)
+                Sv = np.atleast_2d(elem.Sv)
 
-                w0_x = Sw_x[0] @ u0e
-                w0_y = Sw_y[0] @ u0e
+                #NOTE Sanders kinematics, Eqs. 39-43 of Castro and Jansen
+                #     (AIAA SciTech 2022). Every nonlinear term of the Sanders
+                #     membrane strains is recovered from the von Karman one by
+                #     the substitution (Sw_x, Sw_y) -> (G1, G2), with
+                #     G1 = Sw_x and G2 = Sw_y - Sv/R, because
+                #       eps_yy^NL  = 1/2 (w,y - v/R)**2
+                #       gamma_xy^NL = w,x (w,y - v/R)
+                #     Using (Sw_x, Sw_y) here would silently fall back to von
+                #     Karman kinematics in phi''', phi^iv and phi_dot''.
+                G1 = Sw_x
+                G2 = Sw_y - Sv/R
+
+                g1_0 = G1[0] @ u0e # w0,x
+                g2_0 = G2[0] @ u0e # w0,y - v0/R
 
                 Bm = np.asarray(elem.Bm)
                 Bb = np.asarray(elem.Bb)
 
                 #NOTE, added NL terms
-                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*w0_x**2,
-                                                      lambda_a[0]*w0_y**2,
-                                                      lambda_a[0]*2*w0_x*w0_y])
+                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*g1_0**2,
+                                                      lambda_a[0]*g2_0**2,
+                                                      lambda_a[0]*2*g1_0*g2_0])
                 ki0 = kj0 = Bb @ u0e
 
                 ##TODO why lambda_i[0]?
                 #ei = ei0*lambda_a[0]
                 #ki = ki0*lambda_a[0]
 
-                ei00 = ej00 = flag*np.array([w0_x**2,
-                                             w0_y**2,
-                                             2*w0_x*w0_y])
+                ei00 = ej00 = flag*np.array([g1_0**2,
+                                             g2_0**2,
+                                             2*g1_0*g2_0])
 
                 Ni0 = Aij@ej0 + Bij@kj0
                 Ni00 = Aij@ej00
@@ -629,25 +643,25 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 #Ni = Ni0*lambda_a[0]
 
                 #NOTE, added NL terms
-                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Sw_x[0],
-                                                                  w0_y*Sw_y[0],
-                                                                  w0_x*Sw_y[0] + w0_y*Sw_x[0]])
+                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([g1_0*G1[0],
+                                                                  g2_0*G2[0],
+                                                                  g1_0*G2[0] + g2_0*G1[0]])
 
                 kia = kib = kic = Bb
 
                 Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
                 #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                eia0 = eib0 = eic0 = flag*np.array([w0_x*Sw_x[0],
-                                                    w0_y*Sw_y[0],
-                                                    w0_x*Sw_y[0] + w0_y*Sw_x[0]])
+                eia0 = eib0 = eic0 = flag*np.array([g1_0*G1[0],
+                                                    g2_0*G2[0],
+                                                    g1_0*G2[0] + g2_0*G1[0]])
 
                 Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
                 Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
 
-                eiab[0] = Sw_x.T @ Sw_x
-                eiab[1] = Sw_y.T @ Sw_y
-                eiab[2] = Sw_x.T @ Sw_y + Sw_y.T @ Sw_x
+                eiab[0] = G1.T @ G1
+                eiab[1] = G2.T @ G2
+                eiab[2] = G1.T @ G2 + G2.T @ G1
 
                 eicd = eibd = eibc = eiad = eiac = eiab
 
