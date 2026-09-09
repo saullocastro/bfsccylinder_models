@@ -9,7 +9,7 @@ except ImportError:
 
 import numpy as np
 from numpy import isclose
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, bmat, csc_matrix
 from scipy.sparse.linalg import eigsh
 from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
         update_fint, DOF, DOUBLE, INT, KC0_SPARSE_SIZE, KCNL_SPARSE_SIZE,
@@ -21,7 +21,9 @@ num_nodes = 4
 
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
-        num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False):
+        num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
+        NLprebuck_eps1=0.005, NLprebuck_maxiter=12, NR_maxiter=40,
+        NR_eps=1.e-4, NR_eps_accept=1.e-3):
 
     circ = 2*np.pi*R
     out = {}
@@ -180,6 +182,45 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     cg_x0 = uu.copy()
 
     u0[bu] = uu
+    u0_lin = u0.copy()
+
+    def assemble_KG(u):
+        KGv[:] = 0
+        for elem in elements:
+            update_KG(u, elem, points, weights, KGr, KGc, KGv)
+        return coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
+
+    def solve_eig(KCuu, KGuu):
+        """Buckling multipliers of the stress state currently stored in KG
+
+        The starting vector is fixed on purpose. ARPACK keeps its random seed
+        in a SAVEd variable, so without one the basis it returns for a
+        degenerate eigenspace, and the buckling modes of a cylinder are
+        degenerate pairs, depends on how many eigenvalue problems were solved
+        before in the same process. The second order field is obtained by
+        deflating that basis, so b_ijkl would otherwise change with the order
+        in which the analyses run.
+        """
+        v0 = np.random.default_rng(0).random(KCuu.shape[0])
+        eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
+                tol=1e-6, v0=v0)
+        return eigvals, eigvecsu, -1/eigvals
+
+    def bordered_solve(Auu, rhs, Q):
+        """Solve Auu x = rhs with x orthogonal to the columns of Q
+
+        Used wherever Auu is singular, or nearly so, along Q. The bordered
+        system is non singular there and the Lagrange multipliers absorb the
+        component of rhs that lies in that space.
+        """
+        if Q is None or Q.shape[1] == 0:
+            return spsolve(Auu, rhs)
+        n = Auu.shape[0]
+        Qs = csc_matrix(Q)
+        A = bmat([[Auu, Qs], [Qs.T, None]], format='csc')
+        b = np.zeros(n + Q.shape[1])
+        b[:n] = rhs
+        return spsolve(A, b)[:n]
 
     if NLprebuck:
         print('#    initiating nonlinear pre-buckling state')
@@ -187,15 +228,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
         KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
 
-        def calc_KT(u, KCNLv, KGv):
-            KCNLv *= 0
-            KGv *= 0
+        def assemble_KCNL(u):
+            KCNLv[:] = 0
             for elem in elements:
                 update_KCNL(u, elem, points, weights, KCNLr, KCNLc, KCNLv)
-                update_KG(u, elem, points, weights, KGr, KGc, KGv)
-            KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
-            KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
-            return KC0 + KCNL + KG
+            return coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+
+        def calc_KT(u):
+            return KC0 + assemble_KCNL(u) + assemble_KG(u)
 
         def calc_fint(u, fint):
             fint *= 0
@@ -213,67 +253,211 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             """
             return np.sqrt((vec*np.abs(1/D))@vec)
 
-        iteration = 0
-        fint = np.zeros(N)
-        fint = calc_fint(u0, fint)
-        Ri = fint - fext
-        du = np.zeros(N)
-        ui = u0.copy()
-        epsilon = 1.e-4
-        KT = calc_KT(u0, KCNLv, KGv)
-        KTuu = KT[bu, :][:, bu]
         D = KC0uu.diagonal() # at beginning of load increment
-        while True:
-            print('#    iteration', iteration)
-            duu = spsolve(KTuu, -Ri[bu])
-            du[bu] = duu
-            u = ui + du
-            fint = calc_fint(u, fint)
-            Ri = fint - fext
-            crisfield_test = scaling(Ri[bu], D)/max(scaling(fext[bu], D), scaling(fint[bu], D))
-            print('#        crisfield_test, max(R)', crisfield_test, np.abs(Ri).max())
-            if crisfield_test < epsilon:
-                print('#    converged')
-                break
-            iteration += 1
-            KT = calc_KT(u, KCNLv, KGv)
+        epsilon = NR_eps
+
+        def solve_prebuckling(lambda_b, ui, Qdefl=None):
+            """Pre-buckling state at the load level lambda_b*Nxxunit
+
+            Qdefl holds the buckling modes estimated so far. The fundamental
+            path of a perfect cylinder under axial compression has no
+            component along them, they are not axisymmetric, but close to the
+            bifurcation point the tangent stiffness matrix is nearly singular
+            in those directions, so any round off component of the residual
+            there is amplified and the iteration diverges. Deflating them
+            keeps the correction on the fundamental path.
+            """
+            fext_b = lambda_b*fext
+            fint = np.zeros(N)
+            fint = calc_fint(ui, fint)
+            Ri = fint - fext_b
+            du = np.zeros(N)
+            u = ui.copy()
+            KT = calc_KT(ui)
             KTuu = KT[bu, :][:, bu]
-            ui = u.copy()
-        u0 = u.copy()
+            iteration = 0
+            best_test = np.inf
+            u_best = ui.copy()
+            stall = 0
 
+            def give_up(reason):
+                #NOTE close to the bifurcation point the residual of the
+                #     deflated iteration reaches a floor above NR_eps and then
+                #     starts growing again. The best iterate is still a
+                #     perfectly usable equilibrium state whenever that floor
+                #     is below NR_eps_accept, so it is kept instead of
+                #     throwing the load step away
+                if best_test < NR_eps_accept:
+                    print('#        %s, keeping the best iterate, '
+                            'crisfield_test %r' % (reason, best_test))
+                    return u_best, calc_KT(u_best)
+                raise RuntimeError('Newton-Raphson %s at lambda_b=%r, the '
+                        'pre-buckling state is probably too close to the '
+                        'bifurcation point' % (reason, lambda_b))
 
-        KCNLv *= 0
-        for elem in elements:
-            update_KCNL(u0, elem, points, weights, KCNLr, KCNLc, KCNLv)
-        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
+            while True:
+                duu = bordered_solve(KTuu, -Ri[bu], Qdefl)
+                du[bu] = duu
+                u = ui + du
+                fint = calc_fint(u, fint)
+                Ri = fint - fext_b
+                crisfield_test = scaling(Ri[bu], D)/max(
+                        scaling(fext_b[bu], D), scaling(fint[bu], D))
+                print('#        iteration', iteration, 'crisfield_test',
+                        crisfield_test)
+                if crisfield_test < epsilon:
+                    return u, calc_KT(u)
+                if crisfield_test < best_test:
+                    best_test = crisfield_test
+                    u_best = u.copy()
+                    stall = 0
+                else:
+                    stall += 1
+                    if stall >= 3:
+                        return give_up('stalled')
+                #NOTE bailing out as soon as the iteration is clearly running
+                #     away, so that the load stepping can back off without
+                #     spending NR_maxiter iterations first
+                if crisfield_test > 0.5:
+                    return give_up('diverged')
+                iteration += 1
+                if iteration > NR_maxiter:
+                    return give_up('did not converge')
+                KT = calc_KT(u)
+                KTuu = KT[bu, :][:, bu]
+                ui = u.copy()
+
+        #NOTE Iterative eigenvalue algorithm of Sun et al. (2020), Eqs. (44)
+        #     to (46), Step 1 of their Fig. 2. The asymptotic expansion is
+        #     only valid about a pre-buckling state in the neighbourhood of
+        #     the bifurcation point, lambda_b/lambda_c approximately 0.995.
+        #     Expanding about the reference load Nxxunit instead leaves
+        #     lambda_b/lambda_c of the order of 0.1, where the nonlinear
+        #     pre-buckling deformation caused by the edge restraint has not
+        #     developed yet, and gives back the membrane pre-buckling result
+        def calc_u0dot(KT, Qdefl=None):
+            """Eq. (29), rate of the pre-buckling state with respect to the
+            load parameter. Assuming instead that the pre-buckling path is
+            linear in lambda, u0(lambda) = lambda*u0, would make this equal
+            to the pre-buckling state itself. The buckling modes are deflated
+            for the same reason as in solve_prebuckling"""
+            u0dot = np.zeros(N, dtype=DOUBLE)
+            u0dot[bu] = bordered_solve(KT[bu, :][:, bu], fext[bu], Qdefl)
+            return u0dot
+
+        lambda_b = 1.
+        u0 = u0_lin.copy()
+        KT = None
+        #NOTE the previous converged load step, kept for the backward
+        #     difference of Eq. (35)
+        lambda_prev = None
+        u0dot_prev = None
+        KC = KC0 + assemble_KCNL(u0)
+        KG = assemble_KG(u0)
+        print('# starting iterative eigenvalue analysis')
+        converged = False
+        for iteration in range(1, NLprebuck_maxiter+1):
+            KCuu = KC[bu, :][:, bu]
+            KGuu = KG[bu, :][:, bu]
+            eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
+            #NOTE the near critical eigenvectors, deflated from every solve
+            #     with the tangent stiffness matrix from here on
+            crit = [j for j in range(num_eigvals)
+                    if abs(mu[j] - mu[0]) <= 1.e-2*abs(mu[0])]
+            Qdefl = np.linalg.qr(eigvecsu[:, crit])[0]
+            lambda_c = lambda_b*mu[0] # Eq. (46)
+            print('#    iteration', iteration, 'lambda_b', lambda_b,
+                    'lambda_c', lambda_c, 'lambda_b/lambda_c',
+                    lambda_b/lambda_c)
+            if (lambda_c - lambda_b)/lambda_c <= NLprebuck_eps1: # Eq. (45)
+                print('#    converged')
+                converged = True
+                break
+            #NOTE eta=0.8 in the first iteration to approach the neighbourhood
+            #     of the buckling load quickly, eta=0.5 afterwards to avoid
+            #     overshooting it and getting a negative eigenvalue
+            eta = 0.8 if iteration == 1 else 0.5
+            #NOTE the load stepping is load controlled, so the last steps take
+            #     the state very close to a singular tangent stiffness matrix.
+            #     A tangent predictor keeps the Newton-Raphson in its
+            #     convergence radius there, and the step is halved whenever it
+            #     is not enough
+            while True:
+                lambda_b_new = lambda_b + eta*(lambda_c - lambda_b) # Eq. (44)
+                if KT is None:
+                    guess = u0*(lambda_b_new/lambda_b)
+                else:
+                    guess = u0 + calc_u0dot(KT, Qdefl)*(lambda_b_new
+                            - lambda_b)
+                try:
+                    u0_new, KT_new = solve_prebuckling(lambda_b_new, guess,
+                            Qdefl)
+                    break
+                except RuntimeError:
+                    eta *= 0.5
+                    print('#    Newton-Raphson failed, backing off to eta',
+                            eta)
+                    if eta < 1.e-2:
+                        u0_new = KT_new = None
+                        break
+            if u0_new is None:
+                #NOTE no further progress possible with load control
+                break
+            lambda_prev = lambda_b
+            u0dot_prev = u0_lin if KT is None else calc_u0dot(KT, Qdefl)
+            u0, KT = u0_new, KT_new
+            lambda_b = lambda_b_new
+            KC = KC0 + assemble_KCNL(u0)
+            KG = assemble_KG(u0)
+        #NOTE the load stepping is load controlled, so it cannot always be
+        #     pushed all the way to 1 - NLprebuck_eps1. The state reached is
+        #     still far better than the reference load one, so it is kept and
+        #     the ratio actually achieved is reported, rather than throwing
+        #     the whole analysis away
+        if not converged:
+            print('# WARNING: the iterative eigenvalue algorithm stopped at '
+                    'lambda_b/lambda_c = %r, short of the %r requested'
+                    % (lambda_b/lambda_c, 1 - NLprebuck_eps1))
+
+        if KT is None:
+            KT = calc_KT(u0)
+        u0dot = calc_u0dot(KT, Qdefl)
+
+        #NOTE Eqs. (34) and (35), second derivative by a backward difference
+        #     against the load step preceding the converged one, which is what
+        #     Eq. (35) prescribes. Reusing a step the load stepping already
+        #     converged on costs nothing and, unlike an extra step solved
+        #     ahead of lambda_b, cannot fall on the far side of the
+        #     bifurcation point where the Newton-Raphson no longer converges
+        if lambda_prev is None:
+            u0ddot = np.zeros(N, dtype=DOUBLE)
+        else:
+            u0ddot = (u0dot - u0dot_prev)/(lambda_b - lambda_prev)
+
         del KCNLv, KCNLr, KCNLc
         gc.collect()
 
-        KC = KC0 + KCNL
-        KCuu = KC[bu, :][:, bu]
-
     else:
+        lambda_b = 1.
         KC = KC0
         KCuu = KC0uu
+        KG = assemble_KG(u0)
+        KGuu = KG[bu, :][:, bu]
+        print('# starting eigenvalue analysis')
+        eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
+        lambda_c = lambda_b*mu[0]
+        #NOTE a linear pre-buckling state is exactly linear in lambda
+        u0dot = u0.copy()
+        u0ddot = np.zeros(N, dtype=DOUBLE)
 
+    print('# finished eigenvalue analysis')
     print('# finished static analysis')
 
-    #NOTE u0 represents the latest linear or nonlinear pre-buckling state
-
-    KGv *= 0
-    for elem in elements:
-        update_KG(u0, elem, points, weights, KGr, KGc, KGv)
-    KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
-    KGuu = KG[bu, :][:, bu]
-
-    print('# starting eigenvalue analysis')
-    #eigvals, eigvecsu = eigsh(A=KCuu, k=num_eigvals, which='SM', M=KGuu,
-            #tol=1e-8, sigma=1., mode='buckling')
-    #load_mult = eigvals
-    eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
-            tol=1e-6)
-    load_mult = -1/eigvals
-    print('# finished eigenvalue analysis')
+    #NOTE u0 is the pre-buckling state about which the expansion is made and
+    #     mu the buckling multipliers of that state, so that the load factors
+    #     with respect to Nxxunit are lambda_b*mu. mu[0] equals 1 within
+    #     NLprebuck_eps1 once the iterative eigenvalue algorithm converged
+    load_mult = lambda_b*mu
 
     Pcr = load_mult[0]*Nxxunit*circ
     print('# load_mult', load_mult)
@@ -283,6 +467,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     out['cg_x0'] = cg_x0
     out['eigvals'] = eigvals
     out['load_mult'] = load_mult
+    out['lambda_b'] = lambda_b
+    out['mu'] = mu
     eigvecs = np.zeros((N, num_eigvals))
     eigvecs[bu, :] = eigvecsu
     out['eigvecs'] = eigvecs
@@ -340,6 +526,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     # higher-order tensors for elements
 
     u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
+    u0dote = np.zeros(num_nodes*DOF, dtype=np.float64)
+    u0ddote = np.zeros(num_nodes*DOF, dtype=np.float64)
     Aij = prop.A
     Bij = prop.B
     #Dij = prop.D
@@ -354,11 +542,21 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         c4 = elem.c4
 
         u0e *= 0
+        u0dote *= 0
+        u0ddote *= 0
         for i in range(DOF):
             u0e[0*DOF + i] = u0[c1 + i]
             u0e[1*DOF + i] = u0[c2 + i]
             u0e[2*DOF + i] = u0[c3 + i]
             u0e[3*DOF + i] = u0[c4 + i]
+            u0dote[0*DOF + i] = u0dot[c1 + i]
+            u0dote[1*DOF + i] = u0dot[c2 + i]
+            u0dote[2*DOF + i] = u0dot[c3 + i]
+            u0dote[3*DOF + i] = u0dot[c4 + i]
+            u0ddote[0*DOF + i] = u0ddot[c1 + i]
+            u0ddote[1*DOF + i] = u0ddot[c2 + i]
+            u0ddote[2*DOF + i] = u0ddot[c3 + i]
+            u0ddote[3*DOF + i] = u0ddot[c4 + i]
 
         uae = {}
         for modei in range(koiter_num_modes):
@@ -404,45 +602,54 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 Sw_x = np.atleast_2d(elem.Sw_x)
                 Sw_y = np.atleast_2d(elem.Sw_y)
 
-                w0_x = Sw_x[0] @ u0e
-                w0_y = Sw_y[0] @ u0e
+                #NOTE the pre-buckling STATE and its first and second RATES
+                #     with respect to the load parameter are independent
+                #     fields. Writing w0_x_s = lambda*w0_x_d, as an exactly
+                #     linear pre-buckling path would allow, is what makes the
+                #     nonlinear pre-buckling behaviour disappear
+                w0_x_s = Sw_x[0] @ u0e
+                w0_y_s = Sw_y[0] @ u0e
+                w0_x_d = Sw_x[0] @ u0dote
+                w0_y_d = Sw_y[0] @ u0dote
+                w0_x_dd = Sw_x[0] @ u0ddote
+                w0_y_dd = Sw_y[0] @ u0ddote
 
                 Bm = np.asarray(elem.Bm)
                 Bb = np.asarray(elem.Bb)
 
-                #NOTE, added NL terms
-                ei0 = ej0 = Bm @ u0e + flag*np.array([lambda_a[0]*w0_x**2,
-                                                      lambda_a[0]*w0_y**2,
-                                                      lambda_a[0]*2*w0_x*w0_y])
-                ki0 = kj0 = Bb @ u0e
+                #NOTE eps_dot, the first derivative of the pre-buckling strain
+                #     with respect to the load parameter, d/dl of
+                #     Bm u + [w,x**2/2, w,y**2/2, w,x w,y]
+                ei0 = ej0 = Bm @ u0dote + flag*np.array([
+                        w0_x_s*w0_x_d,
+                        w0_y_s*w0_y_d,
+                        w0_x_s*w0_y_d + w0_y_s*w0_x_d])
+                ki0 = kj0 = Bb @ u0dote
 
-                ##TODO why lambda_i[0]?
-                #ei = ei0*lambda_a[0]
-                #ki = ki0*lambda_a[0]
-
-                ei00 = ej00 = flag*np.array([w0_x**2,
-                                             w0_y**2,
-                                             2*w0_x*w0_y])
+                #NOTE eps_dot_dot, the second derivative
+                ei00 = ej00 = Bm @ u0ddote + flag*np.array([
+                        w0_x_d**2 + w0_x_s*w0_x_dd,
+                        w0_y_d**2 + w0_y_s*w0_y_dd,
+                        2*w0_x_d*w0_y_d + w0_x_s*w0_y_dd + w0_y_s*w0_x_dd])
+                ki00 = kj00 = Bb @ u0ddote
 
                 Ni0 = Aij@ej0 + Bij@kj0
-                Ni00 = Aij@ej00
+                Ni00 = Aij@ej00 + Bij@kj00
 
-                ##TODO why lambda_a[0]?
-                #Ni = Ni0*lambda_a[0]
-
-                #NOTE, added NL terms
-                eia = eib = eic = Bm + flag*lambda_a[0]*np.array([w0_x*Sw_x[0],
-                                                                  w0_y*Sw_y[0],
-                                                                  w0_x*Sw_y[0] + w0_y*Sw_x[0]])
+                #NOTE d(eps)/d(u_a) at the pre-buckling state
+                eia = eib = eic = Bm + flag*np.array([w0_x_s*Sw_x[0],
+                                                      w0_y_s*Sw_y[0],
+                                                      w0_x_s*Sw_y[0] + w0_y_s*Sw_x[0]])
 
                 kia = kib = kic = Bb
 
                 Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
                 #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
 
-                eia0 = eib0 = eic0 = flag*np.array([w0_x*Sw_x[0],
-                                                    w0_y*Sw_y[0],
-                                                    w0_x*Sw_y[0] + w0_y*Sw_x[0]])
+                #NOTE d2(eps)/dl d(u_a)
+                eia0 = eib0 = eic0 = flag*np.array([w0_x_d*Sw_x[0],
+                                                    w0_y_d*Sw_y[0],
+                                                    w0_x_d*Sw_y[0] + w0_y_d*Sw_x[0]])
 
                 Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
                 Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
@@ -540,20 +747,15 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         #phi2 = KC + KG #TODO with KG?
         #phi2uu = KCuu + KGuu #TODO with KGuu?
     #else:
-    if flag == 1:
-        KCNLr = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
-        KCNLc = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=INT)
-        KCNLv = np.zeros(KCNL_SPARSE_SIZE*num_elements, dtype=DOUBLE)
-        KCNLv *= 0
-        for elem in elements:
-            update_KCNL(u0*lambda_a[0], elem, points, weights, KCNLr, KCNLc, KCNLv)
-        KCNL = coo_matrix((KCNLv, (KCNLr, KCNLc)), shape=(N, N)).tocsc()
-        KC = KC0 + KCNL
-        KCuu = KC[bu, :][:, bu]
-
-    #NOTE I checked and phi2 can be really defined using K + KNL + KG
-    phi2 = KC + KG*lambda_a[0]
-    phi2uu = KCuu + KGuu*lambda_a[0]
+    #NOTE phi2 must be the SAME operator whose null vector is the buckling
+    #     mode, so it is built from the KC and KG of the eigenvalue analysis,
+    #     both evaluated at the converged pre-buckling state, and scaled by
+    #     the multiplier mu of that state rather than by the load factor
+    #     lambda_c. Rebuilding KC from KCNL(lambda_c*u0) here, while the
+    #     eigenproblem used KCNL(u0), leaves phi2 non singular in the
+    #     direction of the buckling mode and corrupts the second order field
+    phi2 = KC + KG*mu[0]
+    phi2uu = KCuu + KGuu*mu[0]
 
     phi2_ab = {}
     for modei in range(koiter_num_modes):
@@ -583,18 +785,47 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                         - (1/koiter_num_modes)*a_kij*lambda_k*phi20_a[modek]
                         )
 
+    #NOTE phi2 is singular by construction, the buckling modes span its null
+    #     space, so the second order fields cannot be obtained from a plain
+    #     spsolve followed by a Gram-Schmidt projection. They come from the
+    #     bordered system
+    #         [phi2  Q] [uab  ]   [force2ndorder]
+    #         [Q^T   0] [alpha] = [      0      ]
+    #     which is non singular and enforces the orthogonality to the modes
+    #     while solving. Q holds the buckling modes.
+    #TODO the border enforces the Euclidean orthogonality Q^T uab = 0, which
+    #     is the condition that the previous Gram-Schmidt step imposed. The
+    #     orthogonality condition of Sun et al. Eq. (18), in finite element
+    #     form Eq. (33), is weighted by the stiffness matrices and is
+    #     inhomogeneous, and still has to replace this one
+    #NOTE the buckling modes of a cylinder come in degenerate pairs, one for
+    #     each sign of the circumferential wave number, so the null space of
+    #     phi2 is spanned by every eigenvector whose multiplier is equal to
+    #     the critical one. Bordering with the Koiter modes alone would leave
+    #     the bordered system singular along the remaining ones
+    nu = int(bu.sum())
+    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
+    for j in range(num_eigvals):
+        if abs(mu[j] - mu[0]) <= 1.e-3*abs(mu[0]):
+            cols.append(eigvecsu[:, j])
+    Qfull = np.asarray(cols).T
+    #NOTE an orthonormal basis of that space, dropping the dependent columns
+    Qo, r = np.linalg.qr(Qfull)
+    keep = np.abs(np.diag(r)) > 1.e-10*np.abs(np.diag(r)).max()
+    Q = Qo[:, keep]
+    print('# null space of phi2 deflated with %d vectors' % Q.shape[1])
+    Qs = csc_matrix(Q)
+    bordered = bmat([[phi2uu, Qs], [Qs.T, None]], format='csc')
+
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
+            rhs = np.zeros(nu + Q.shape[1])
+            rhs[:nu] = force2ndorder_ij[(modei, modej)][bu]
+            sol = spsolve(bordered, rhs)
             uijbar = np.zeros(N)
-            uijbar[bu] = spsolve(phi2uu, force2ndorder_ij[(modei, modej)][bu])
-            uab[(modei, modej)] = uijbar.copy()
-            # Gram-Schmidt orthogonalization
-            #NOTE uab are orthogonal to all buckling modes, but not mutually
-            #     orthogonal (with respect to other second-order modes)
-            for modek in range(koiter_num_modes):
-                ui = ua[modek]
-                uab[(modei, modej)] -= ui*np.dot(uijbar, ui)/np.dot(ui, ui)
+            uijbar[bu] = sol[:nu]
+            uab[(modei, modej)] = uijbar
 
     print('# b_ijkl factors')
     b_ijkl = {}
