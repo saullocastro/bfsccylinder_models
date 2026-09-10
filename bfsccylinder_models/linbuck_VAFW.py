@@ -9,7 +9,7 @@ from bfsccylinder.quadrature import get_points_weights
 
 def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
         h_tow, desvars, funcVAT, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
-        num_eigvals=2):
+        num_eigvals=2, lobpcg_tol=1e-5):
     # geometry our FW cylinders
     circ = 2*pi*R # m
 
@@ -205,10 +205,8 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     else:
         Xu = lobpcg_X
 
-    #NOTE default tolerance is too large
-    tol = 1e-5
     eigvals, eigvecsu, hist = lobpcg(A=PREC*Kuu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
-            maxiter=maxiter, retResidualNormsHistory=True, tol=tol)
+            maxiter=maxiter, retResidualNormsHistory=True, tol=lobpcg_tol)
     load_mult = eigvals
     if not len(hist) <= maxiter:
         print('#   failed with lobpcg()')

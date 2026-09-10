@@ -27,7 +27,8 @@ def test():
               [51.4, 5.1, 42.6],
               ]
     out = linBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12,
-            rho, plyt, desvars, func_VAT_P_x, clamped=True, nint=nint)
+            rho, plyt, desvars, func_VAT_P_x, clamped=True, nint=nint,
+            lobpcg_tol=1e-4)
     print(out)
 
 if __name__ == '__main__':
