@@ -1,0 +1,626 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{margin=2.6cm}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,
+            urlcolor=blue!50!black}
+
+\newcommand{\ub}{\bm{q}}
+\newcommand{\uv}{\bm{u}}
+\newcommand{\Kt}{\bm{K}_t}
+\newcommand{\KC}{\bm{K}_C}
+\newcommand{\KG}{\bm{K}_G}
+\newcommand{\KCz}{\bm{K}_{C_0}}
+\newcommand{\KCNL}{\bm{K}_{C}^{NL}}
+\newcommand{\dd}[1]{\dot{#1}}
+\newcommand{\ddd}[1]{\ddot{#1}}
+
+\title{Koiter asymptotic analysis about a nonlinear pre-buckling state\\
+\large Implementation notes for \texttt{NLprebuck=True} in
+\texttt{bfsccylinder\_models}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note documents the implementation of the single-mode Koiter method with a
+nonlinear pre-buckling state in
+\texttt{koiter\_cylinder\_newton\_raphson.py} (von K\'arm\'an kinematics) and
+\texttt{koiter\_cylinder\_newton\_raphson\_sanders.py} (Sanders kinematics).
+It covers the incremental--iterative algorithm that locates the expansion
+point in the neighbourhood of the bifurcation load, the consistency
+requirements on the operators used in the eigenvalue problem and in the
+asymptotic expansion, and the stiffness-weighted orthogonality condition
+imposed on the second-order fields.  Equation numbers of the form
+``Sun~Eq.~(nn)'' refer to Sun, Tian, Li and Wang, \emph{Accelerated Koiter
+method for post-buckling analysis of thin-walled shells under axial
+compression}, Thin-Walled Structures \textbf{155} (2020) 106962.
+\end{abstract}
+
+\tableofcontents
+
+%==============================================================================
+\section{Scope}
+%==============================================================================
+
+The routine \texttt{fkoiter\_cyl\_SS3} performs, for a circular cylindrical
+shell under axial compression with SS-3 boundary conditions,
+\begin{enumerate}\itemsep2pt
+  \item a pre-buckling analysis,
+  \item a buckling eigenvalue analysis about the pre-buckling state,
+  \item the Koiter asymptotic expansion about the bifurcation point, returning
+        the post-buckling coefficients $a_{ijk}$ and $b_{ijkl}$.
+\end{enumerate}
+
+With \texttt{NLprebuck=False} the pre-buckling state is the linear elastic
+solution and the pre-buckling path is exactly linear in the load parameter.
+With \texttt{NLprebuck=True} the pre-buckling state is obtained from a
+geometrically nonlinear analysis, and the whole expansion must then be carried
+out about a state \emph{in the neighbourhood of the bifurcation point}.  This
+document describes the latter case.
+
+Throughout, $\lambda$ is the load parameter multiplying the reference load
+$N_{xx}^{\text{unit}}$, $\bm{f}_0$ is the corresponding reference load vector,
+$\lambda_b$ is the load level at which the pre-buckling state is evaluated,
+and $\lambda_c$ is the bifurcation load.
+
+%==============================================================================
+\section{Kinematics and the discrete energy functional}
+%==============================================================================
+
+\subsection{Strain measures}
+
+The membrane strains are written, for both kinematic models, as
+\begin{equation}
+  \bm{\varepsilon}
+  = \bm{B}_m\ub
+  + \tfrac12
+    \begin{Bmatrix} g_1^2 \\ g_2^2 \\ 2\,g_1 g_2 \end{Bmatrix},
+  \qquad
+  \bm{\kappa} = \bm{B}_b\ub ,
+  \label{eq:strain}
+\end{equation}
+where $g_1$ and $g_2$ are the two gradient measures that carry the geometric
+nonlinearity,
+\begin{equation}
+  \text{von K\'arm\'an:}\quad g_1 = w_{,x},\quad g_2 = w_{,y},
+  \qquad
+  \text{Sanders:}\quad g_1 = w_{,x},\quad g_2 = w_{,y} - \frac{v}{R} .
+  \label{eq:g12}
+\end{equation}
+Every nonlinear term of the Sanders membrane strains is recovered from the von
+K\'arm\'an one by the substitution $(w_{,x},w_{,y})\rightarrow(g_1,g_2)$, which
+is why the two modules differ only in the definition~\eqref{eq:g12} and in the
+corresponding interpolation matrices $\bm{G}_1,\bm{G}_2$ with
+$g_\alpha = \bm{G}_\alpha\ub$.
+
+The constitutive relation is the usual laminated-shell one,
+$\bm{N} = \bm{A}\bm{\varepsilon} + \bm{B}\bm{\kappa}$ and
+$\bm{M} = \bm{B}\bm{\varepsilon} + \bm{D}\bm{\kappa}$, collectively denoted
+$H$.
+
+\subsection{State and rates are independent fields}
+\label{sec:staterates}
+
+The pre-buckling state is a curve $\ub_0(\lambda)$.  The asymptotic expansion
+needs, besides the state itself, its first and second derivatives with respect
+to $\lambda$, written $\dd{\ub}_0$ and $\ddd{\ub}_0$.  Differentiating
+\eqref{eq:strain} along the path, and abbreviating
+$g_\alpha^s = \bm{G}_\alpha\ub_0$, $g_\alpha^d = \bm{G}_\alpha\dd{\ub}_0$,
+$g_\alpha^{dd} = \bm{G}_\alpha\ddd{\ub}_0$,
+\begin{align}
+  \dd{\bm{\varepsilon}}
+  &= \bm{B}_m\dd{\ub}_0
+   + \begin{Bmatrix}
+       g_1^s g_1^d \\ g_2^s g_2^d \\ g_1^s g_2^d + g_2^s g_1^d
+     \end{Bmatrix},
+  & \dd{\bm{\kappa}} &= \bm{B}_b\dd{\ub}_0,
+  \label{eq:epsdot}\\[4pt]
+  \ddd{\bm{\varepsilon}}
+  &= \bm{B}_m\ddd{\ub}_0
+   + \begin{Bmatrix}
+       (g_1^d)^2 + g_1^s g_1^{dd} \\
+       (g_2^d)^2 + g_2^s g_2^{dd} \\
+       2 g_1^d g_2^d + g_1^s g_2^{dd} + g_2^s g_1^{dd}
+     \end{Bmatrix},
+  & \ddd{\bm{\kappa}} &= \bm{B}_b\ddd{\ub}_0,
+  \label{eq:epsddot}
+\end{align}
+and the derivatives with respect to the nodal degrees of freedom
+\begin{equation}
+  \frac{\partial\bm{\varepsilon}}{\partial\ub_a}
+  = \bm{B}_m + \begin{Bmatrix}
+      g_1^s\bm{G}_1 \\ g_2^s\bm{G}_2 \\
+      g_1^s\bm{G}_2 + g_2^s\bm{G}_1 \end{Bmatrix},
+  \qquad
+  \frac{\partial^2\bm{\varepsilon}}{\partial\lambda\,\partial\ub_a}
+  = \begin{Bmatrix}
+      g_1^d\bm{G}_1 \\ g_2^d\bm{G}_2 \\
+      g_1^d\bm{G}_2 + g_2^d\bm{G}_1 \end{Bmatrix}.
+  \label{eq:epsderivs}
+\end{equation}
+
+\begin{quote}\small
+\textbf{Remark.} If one assumes the pre-buckling path to be linear in the load
+parameter, $\ub_0(\lambda) = \lambda\,\ub_0(1)$, then
+$\dd{\ub}_0 = \ub_0(1)$, $\ddd{\ub}_0 = \bm{0}$ and
+$g_\alpha^s = \lambda\,g_\alpha^d$, so \eqref{eq:epsdot}--\eqref{eq:epsderivs}
+collapse onto expressions containing $\lambda$ explicitly.  That assumption is
+precisely what removes the nonlinear pre-buckling behaviour from the
+expansion, and it is not made here: state, first rate and second rate are
+carried as three independent nodal fields.
+\end{quote}
+
+\subsection{Discrete energy derivatives}
+
+Let $\phi$ be the total potential energy.  The following contractions are
+assembled element by element and are the building blocks of the expansion:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+symbol in the code & meaning \\
+\midrule
+\texttt{phi2}                & $\phi_2 = \partial^2\phi/\partial\ub^2$, the tangent operator at the critical state \\
+\texttt{phi3\_ab[(i,j)]}     & $\phi_3$ contracted with modes $i,j$, one free index \\
+\texttt{phi4[(i,j,k,l)]}     & $\phi_4$ fully contracted \\
+\texttt{phi20\_a[i]}         & $\partial\phi_2/\partial\lambda$ contracted with mode $i$, one free index \\
+\texttt{phi30\_ab[(i,j)]}    & $\partial\phi_3/\partial\lambda$ contracted with modes $i,j$, one free index \\
+\texttt{phi200\_ab[(i,j)]}   & $\partial^2\phi_2/\partial\lambda^2$ fully contracted \\
+\bottomrule
+\end{tabular}
+\end{center}
+All of them are built from \eqref{eq:epsdot}--\eqref{eq:epsderivs} together
+with the constant quadratic form
+$\partial^2\bm{\varepsilon}/\partial\ub_a\partial\ub_b$, which for
+\eqref{eq:strain} is
+$\bm{G}_1^{\!\top}\bm{G}_1$, $\bm{G}_2^{\!\top}\bm{G}_2$ and
+$\bm{G}_1^{\!\top}\bm{G}_2 + \bm{G}_2^{\!\top}\bm{G}_1$ in the three strain
+components.
+
+%==============================================================================
+\section{Locating the expansion point}
+%==============================================================================
+
+\subsection{Why the load level matters}
+
+Koiter's expansion is asymptotic about the bifurcation point.  Sun~\S2.2
+requires the pre-buckling state to satisfy
+$\lambda_b/\lambda_c \approx 0.995$.  If instead the pre-buckling problem is
+solved once at the reference load and the eigenvalue problem is posed about
+that state, then for the shells considered here $\lambda_b/\lambda_c$ is of
+the order of $0.1$.  At that load level the radial pre-buckling deflection is
+one to three per cent of a wall thickness, the boundary layer produced by the
+edge restraint has not developed, and
+$\lVert\KCNL(\ub_0)\rVert/\lVert\KCz\rVert \sim 2\times10^{-4}$; the
+eigenvalue analysis is then a linear buckling analysis in all but name and the
+whole computation returns the \emph{membrane} pre-buckling answer.
+
+\subsection{Iterative eigenvalue algorithm}
+
+The expansion point is located by the incremental--iterative scheme of
+Sun~Eqs.~(44)--(46).  At the current load level $\lambda_b$ the pre-buckling
+state $\ub_0$ is known and the eigenvalue problem
+\begin{equation}
+  \big[\KC(\ub_0) + \mu\,\KG(\ub_0)\big]\,\ub_1 = \bm{0},
+  \qquad
+  \KC(\ub_0) = \KCz + \KCNL(\ub_0),
+  \label{eq:eig}
+\end{equation}
+gives the multiplier $\mu$ \emph{of the current stress state}, so that
+\begin{equation}
+  \lambda_c = \lambda_b\,\mu .
+  \label{eq:lambdac}
+\end{equation}
+Convergence is declared when
+\begin{equation}
+  \frac{\lambda_c-\lambda_b}{\lambda_c} \le \varepsilon_1 ,
+  \label{eq:conv}
+\end{equation}
+with $\varepsilon_1 = 0.005$ by default, and otherwise the load level is
+advanced by
+\begin{equation}
+  \lambda_b \leftarrow \lambda_b + \eta\,(\lambda_c - \lambda_b),
+  \qquad
+  \eta = 0.8 \text{ on the first step},\quad \eta = 0.5 \text{ afterwards}.
+  \label{eq:step}
+\end{equation}
+The larger first factor moves quickly into the neighbourhood of the buckling
+load; the smaller subsequent one avoids overshooting it.
+
+At convergence $\mu \simeq 1$ to within $\varepsilon_1$, which is what makes
+the operators of \eqref{eq:eig} usable directly in the expansion
+(Section~\ref{sec:consistency}).
+
+\subsection{Pre-buckling solve near a singular tangent}
+\label{sec:nr}
+
+Each load step solves $\bm{f}_{\text{int}}(\ub) = \lambda_b\bm{f}_0$ by a
+Newton--Raphson iteration on the tangent stiffness
+$\Kt = \KCz + \KCNL(\ub) + \KG(\ub)$.  Close to the bifurcation point $\Kt$ is
+nearly singular along the buckling modes, and a load-controlled iteration
+diverges: any round-off component of the residual in those directions is
+amplified and throws the iterate off the fundamental path.  Four measures are
+used.
+
+\paragraph{Tangent predictor.}  The starting point of a step is
+$\ub_0 + \dd{\ub}_0\,\Delta\lambda$ rather than a rescaling of the previous
+state.
+
+\paragraph{Deflation of the buckling modes.}  The fundamental path of a
+perfect cylinder under axial compression has no component along the buckling
+modes, which are not axisymmetric.  The correction is therefore obtained from
+the bordered system
+\begin{equation}
+  \begin{bmatrix} \Kt & \bm{Q} \\ \bm{Q}^{\!\top} & \bm{0}\end{bmatrix}
+  \begin{Bmatrix} \delta\ub \\ \bm{\alpha}\end{Bmatrix}
+  =
+  \begin{Bmatrix} -\bm{R} \\ \bm{0}\end{Bmatrix},
+  \label{eq:nrdeflate}
+\end{equation}
+with $\bm{Q}$ the currently estimated near-critical eigenvectors.  This keeps
+$\delta\ub$ on the fundamental path.
+
+\paragraph{Step back-off.}  If the iteration diverges, $\eta$ in
+\eqref{eq:step} is halved and the step retried.  Divergence is detected early,
+as soon as the residual measure exceeds $0.5$, so that a failed trial costs a
+few iterations rather than the full iteration budget.
+
+\paragraph{Best iterate on stall.}  Very close to the bifurcation point the
+residual of the deflated iteration reaches a floor above the convergence
+tolerance and then grows again.  The best iterate is retained whenever that
+floor is below a looser acceptance tolerance.
+
+Even with these measures the load-controlled scheme does not always reach
+$\lambda_b/\lambda_c = 0.995$; the value actually achieved is reported, and
+the analysis proceeds from the best state obtained.  Reaching the target
+reliably requires arc-length control on the fundamental path, or the
+extrapolated eigenvalue problem of Sun~Eq.~(27), neither of which is
+implemented (Section~\ref{sec:limits}).
+
+\subsection{Rates of the pre-buckling state}
+
+The first rate follows from Sun~Eq.~(29), using the tangent stiffness at the
+converged pre-buckling state,
+\begin{equation}
+  \Kt\,\dd{\ub}_0 = \bm{f}_0 ,
+  \label{eq:qdot}
+\end{equation}
+solved with the same deflation \eqref{eq:nrdeflate} for the same reason.  The
+second rate follows from Sun~Eq.~(35) as a backward difference against the
+load step preceding the converged one,
+\begin{equation}
+  \ddd{\ub}_0 = \frac{\dd{\ub}_0 - \dd{\ub}_0^{\,\text{prev}}}
+                     {\lambda_b - \lambda_b^{\,\text{prev}}} .
+  \label{eq:qddot}
+\end{equation}
+Reusing a step the load stepping has already converged on costs nothing, and,
+unlike a step solved ahead of $\lambda_b$, cannot fall on the far side of the
+bifurcation point.  The corresponding stress rates
+$\dd{\bm{\sigma}}$ and $\ddd{\bm{\sigma}}$, Sun~Eqs.~(30) and~(34), follow from
+\eqref{eq:epsdot} and \eqref{eq:epsddot} through $H$.
+
+%==============================================================================
+\section{Consistency of the operators}
+\label{sec:consistency}
+%==============================================================================
+
+The operator appearing in the asymptotic expansion,
+\begin{equation}
+  \phi_2 = \KC(\ub_0) + \mu\,\KG(\ub_0),
+  \label{eq:phi2}
+\end{equation}
+must be \emph{the same} operator whose null vector is the buckling mode, that
+is, exactly the operator of the eigenvalue problem~\eqref{eq:eig}.  Building
+$\phi_2$ from a differently evaluated $\KCNL$ than the one used in
+\eqref{eq:eig} --- for instance from $\KCNL(\lambda_c\ub_0)$ while the
+eigenvalue problem used $\KCNL(\ub_0)$ --- leaves $\phi_2$ non-singular along
+$\ub_1$ and corrupts every quantity derived from it.  The severity is easy to
+measure: with the inconsistent pairing,
+\[
+  \frac{\lVert(\bm{K}_{C,\text{eig}} + \mu\KG)\ub_1\rVert}
+       {\lVert\KCz\ub_1\rVert}
+  \approx 10^{-10},
+  \qquad
+  \frac{\lVert\phi_2\ub_1\rVert}{\lVert\KCz\ub_1\rVert} \approx 4.6 ,
+\]
+i.e.\ the expansion operator does not annihilate the buckling mode at all.
+Since $\lambda_b\simeq\lambda_c$ after the iterative algorithm has converged,
+$\mu\simeq1$ and \eqref{eq:phi2} is simply the tangent operator at the
+critical state.
+
+%==============================================================================
+\section{Second-order fields and the orthogonality condition}
+\label{sec:ortho}
+%==============================================================================
+
+\subsection{The singular system}
+
+The second-order fields $\ub_{ij}$ solve
+\begin{equation}
+  \phi_2\,\ub_{ij} = \bm{g}_{ij},
+  \qquad
+  \bm{g}_{ij} = -\tfrac12\,\phi_{3,ij}
+                - \frac{1}{m}\sum_{k} a_{kij}\,\lambda_k\,\phi_{20,k},
+  \label{eq:secondorder}
+\end{equation}
+with $m$ the number of Koiter modes.  By construction $\phi_2$ is singular:
+its null space is spanned by the buckling modes.  Consequently
+\eqref{eq:secondorder} determines $\ub_{ij}$ only up to an arbitrary element
+of that null space, and a plain sparse solve followed by a projection is not a
+well-posed procedure.  Two things are therefore needed: a solver that copes
+with the singularity, and the correct condition that fixes the null-space
+component.
+
+\subsection{The condition to be imposed}
+
+The orthogonality condition of Koiter's theory is Sun~Eq.~(18),
+\begin{equation}
+  \dd{\bm{\sigma}}_c\!\cdot\! L_{11}(\uv_1,\uv_2)
+  + \bm{\sigma}_1\!\cdot\! L_{11}(\dd{\uv}_c,\uv_2)
+  + \bm{\sigma}_2\!\cdot\! L_{11}(\dd{\uv}_c,\uv_1) = 0 ,
+  \label{eq:sun18}
+\end{equation}
+whose finite element form is Sun~Eq.~(33),
+\begin{equation}
+  \ub_k^{\!\top}
+  \big[\bm{K}_D(\ub_b,\dd{\ub}_b) + \KG(\dd{\bm\sigma}_b)\big]\ub_{ij}
+  + \tfrac12\,
+  \ub_k^{\!\top}\bm{B}_{NL}^{\!\top}(\ub_k)\,H\,\bm{B}_{NL}(\ub_k)\,\dd{\ub}_b
+  = 0 .
+  \label{eq:sun33}
+\end{equation}
+Two observations turn this into something directly computable.
+
+\paragraph{The linear term is already assembled.}  The bracket in the first
+term is the load-parameter derivative of the tangent stiffness,
+\[
+  \bm{K}_D(\ub_b,\dd{\ub}_b) + \KG(\dd{\bm\sigma}_b)
+  = \frac{\partial \phi_2}{\partial\lambda} ,
+\]
+so the first term is $\ub_k^{\!\top}(\partial\phi_2/\partial\lambda)\ub_{ij}$,
+which is exactly the contraction stored as \texttt{phi20\_a[k]}:
+\begin{equation}
+  \text{first term} = \phi_{20,k}\cdot\ub_{ij}.
+\end{equation}
+
+\paragraph{The constant term follows from $\phi_{30}$.}  With
+$\bm{B}_{NL}(\ub)\bm{v} = L_{11}(\ub,\bm{v})$ the second term of
+\eqref{eq:sun33} is
+\begin{equation}
+  \tfrac12\,\big\langle L_2(\uv_k),\,H\,L_{11}(\uv_k,\dd{\uv}_0)\big\rangle
+  \;=\; \tfrac12\,I ,
+  \qquad
+  I = \int \big\langle \bm{N}[L_2(\uv_k)],\,
+                       L_{11}(\dd{\uv}_0,\uv_k)\big\rangle .
+\end{equation}
+Now $\phi_{30,ij}$ is assembled as one half of the quadrature weight times the
+sum of six contractions of the form
+$\langle\bm{N}[\,\cdot\,],\,\partial^2\bm{\varepsilon}/
+\partial\lambda\partial\ub\,\rangle$.  When all mode indices coincide those
+six contributions are equal to one another, by the symmetry of $H$ and of the
+quadratic form, so that
+\begin{equation}
+  \phi_{30,ij}\cdot\ub_k = \tfrac12\cdot 6\,I = 3\,I
+  \qquad\Longrightarrow\qquad
+  \boxed{\;c_k \;=\; \tfrac12 I \;=\;
+         \frac{\phi_{30,ij}\cdot\ub_k}{6}\;}
+  \label{eq:cconst}
+\end{equation}
+No new element integral is required.  The condition to impose is therefore
+\begin{equation}
+  \phi_{20,k}\cdot\ub_{ij} = -\,c_k .
+  \label{eq:condition}
+\end{equation}
+It is weighted by the stiffness matrices, through $\phi_{20}$, and
+inhomogeneous, through $c_k$.  A Gram--Schmidt projection, or equivalently a
+symmetric Euclidean border $\bm{Q}^{\!\top}\ub_{ij} = \bm{0}$, imposes neither
+of these properties and is the procedure that \eqref{eq:condition} replaces.
+
+\subsection{The bordered system}
+
+Both requirements are met by a \emph{non-symmetric} bordered system,
+\begin{equation}
+  \begin{bmatrix}
+    \phi_2 & \bm{N}_{\!sp} \\[2pt]
+    \bm{W}^{\!\top} & \bm{0}
+  \end{bmatrix}
+  \begin{Bmatrix} \ub_{ij} \\ \bm{\alpha} \end{Bmatrix}
+  =
+  \begin{Bmatrix} \bm{g}_{ij} \\ -\bm{c} \end{Bmatrix},
+  \label{eq:bordered}
+\end{equation}
+in which the roles of the two borders are distinct:
+\begin{itemize}\itemsep2pt
+  \item the \emph{column} border $\bm{N}_{\!sp}$ spans the null space of
+        $\phi_2$ and is what makes the system non-singular;
+  \item the \emph{row} border $\bm{W}$ carries the constraints, one column per
+        Koiter mode, $\bm{W}[:,k] = \phi_{20,k}$, with the corresponding
+        right-hand side $-c_k$ from \eqref{eq:cconst}.
+\end{itemize}
+The system is non-singular provided $\bm{W}^{\!\top}\bm{N}_{\!sp}$ is, and its
+leading entry $\phi_{20,k}\cdot\ub_k$ is exactly the quantity that appears in
+the denominator of the post-buckling coefficients, hence non-zero by
+construction.
+
+\subsection{Degenerate modes}
+\label{sec:degenerate}
+
+For a circular cylinder the buckling modes occur in degenerate pairs, one for
+each sign of the circumferential wave number, so $\dim\ker\phi_2 \ge 2$ even
+when a single Koiter mode is retained.  Two consequences follow.
+
+First, $\bm{N}_{\!sp}$ must span the \emph{whole} near-null space, not only the
+retained Koiter modes: every eigenvector whose multiplier equals the critical
+one within a relative tolerance is included, and the set is orthonormalised
+with a rank-revealing factorisation.  Bordering with the Koiter modes alone
+leaves \eqref{eq:bordered} singular along the remaining directions.
+
+Second, \eqref{eq:sun33} supplies one condition per Koiter mode, which is
+fewer than $\dim\ker\phi_2$.  The degenerate partners lie outside single-mode
+theory, and the remaining rows of $\bm{W}$ keep the Euclidean condition, built
+from the null-space directions orthogonal to the retained modes.  This is a
+choice, not a result; the consistent treatment of a degenerate critical mode
+is the multi-mode Koiter expansion.
+
+A related practical point: the basis that an iterative eigensolver returns for
+a degenerate eigenspace is arbitrary.  ARPACK keeps its random seed in a saved
+variable, so without an explicit starting vector the basis --- and with it
+$\ub_{ij}$ and $b_{ijkl}$ --- depends on how many eigenvalue problems have
+been solved before in the same process.  A fixed starting vector is therefore
+passed to the eigensolver, which makes the results reproducible; it does not
+remove the underlying ambiguity, which only multi-mode theory resolves.
+
+%==============================================================================
+\section{Post-buckling coefficients}
+%==============================================================================
+
+With the second-order fields available, the coefficients are
+\begin{equation}
+  a_{ijk} = -\frac{1}{2\lambda_i}\,
+            \frac{\phi_{3,ij}\cdot\ub_k}{\phi_{20,i}\cdot\ub_i},
+  \label{eq:a}
+\end{equation}
+\begin{multline}
+  b_{ijkl} = -\frac{1}{6\,\lambda_i\,(\phi_{20,i}\cdot\ub_i)}
+  \Big[\,
+    \phi_{4,ijkl}
+    + 3\,\phi_{3,ij}\cdot\ub_{kl}
+    + 3\,\phi_{3,il}\cdot\ub_{jk} \\
+    + \lambda_i\big(
+        a_{iij}\,\phi_{30,ik}\!\cdot\!\ub_l
+      + a_{ijk}\,\phi_{30,il}\!\cdot\!\ub_i
+      + a_{ikl}\,\phi_{30,ii}\!\cdot\!\ub_j \big) \\
+    + \phi_{200,ii}\,\lambda_i^2\big(
+        a_{iij}a_{ikl} + a_{ijk}a_{ili} + a_{ikl}a_{iij} \big)
+  \Big].
+  \label{eq:b}
+\end{multline}
+The buckling modes are normalised so that the largest translational amplitude
+equals the shell thickness, which is the normalisation used by the reference
+solutions.
+
+%==============================================================================
+\section{Algorithm}
+%==============================================================================
+
+\begin{algorithm}[H]
+\caption{Koiter analysis about a nonlinear pre-buckling state}
+\begin{algorithmic}[1]
+\State solve $\KCz\ub = \bm{f}_0$ for the linear pre-buckling state;
+       $\lambda_b \gets 1$
+\For{$i = 1,\dots,i_{\max}$}
+  \State assemble $\KC(\ub_0)$, $\KG(\ub_0)$
+  \State solve the eigenvalue problem \eqref{eq:eig} $\rightarrow \mu$,
+         $\ub_1$; \quad $\lambda_c \gets \lambda_b\mu$
+  \State \textbf{if} \eqref{eq:conv} holds \textbf{then break}
+  \State $\eta \gets 0.8$ if $i=1$ else $0.5$
+  \Repeat
+    \State $\lambda_b^{\text{new}} \gets \lambda_b + \eta(\lambda_c-\lambda_b)$
+    \State predictor $\ub_0 + \dd{\ub}_0(\lambda_b^{\text{new}}-\lambda_b)$;
+           Newton--Raphson with deflation \eqref{eq:nrdeflate}
+    \State \textbf{on failure} $\eta \gets \eta/2$
+  \Until{converged or $\eta$ exhausted}
+  \State store $(\lambda_b,\dd{\ub}_0)$ as the previous step; advance
+\EndFor
+\State $\dd{\ub}_0$ from \eqref{eq:qdot}; $\ddd{\ub}_0$ from \eqref{eq:qddot}
+\State assemble $\phi_2,\phi_3,\phi_4,\phi_{20},\phi_{30},\phi_{200}$ using
+       \eqref{eq:epsdot}--\eqref{eq:epsderivs}
+\State $a_{ijk}$ from \eqref{eq:a}
+\State $\ub_{ij}$ from the bordered system \eqref{eq:bordered} with the
+       weighted condition \eqref{eq:condition}
+\State $b_{ijkl}$ from \eqref{eq:b}
+\end{algorithmic}
+\end{algorithm}
+
+%==============================================================================
+\section{Effect on the results}
+%==============================================================================
+
+The two verification cases are the composite cylinder of Sun~\S3.1 and the
+NASA shell AW-CYL-1-1 of Arbocz, Starnes and Nemeth (AIAA-2001-1392); they are
+the same shell, so the ANILISA $n$-search of the latter provides reference
+values for both.  Buckling loads are normalised by
+$N_{c\ell} = E_{11}t^2/\big(R\sqrt{3(1-\nu_{12}^2)}\big)$.
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+ & expanding at $N_{xx}^{\text{unit}}$ & about $\lambda_b\simeq\lambda_c$
+ & ANILISA, nonlinear pre-buckling \\
+\midrule
+$\lambda_b/\lambda_c$      & $0.14$  & $0.985$ & --- \\
+$N_{cr}/N_{c\ell}$         & $0.3581$& $0.3367$& $0.337088$ ($n=7$) \\
+max $|w_0|/t$              & $0.026$ & $0.192$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The first column is the membrane pre-buckling result, which is what the
+computation returns when the expansion point is left at the reference load;
+the reference value for that regime is $0.365992$.  The second column agrees
+with the ANILISA nonlinear pre-buckling entry for the same circumferential
+wave number to $0.1\%$.
+
+The post-buckling coefficient is far more sensitive to mesh refinement than
+the buckling load, and the reference value $b=-0.376$ belongs to the $n=11$
+edge-buckling mode, so a like-for-like comparison requires a mesh fine enough
+for that mode to become critical.  On the finest mesh run here the magnitude
+$|b| = 0.437$ is of the right order, against $-0.37605$ from ANILISA and
+$-0.3772$ from Sun~Table~2, where expanding at the reference load had given
+$-0.0598$, close to the membrane pre-buckling value $-0.048844$.
+
+Its \emph{sign}, however, is not determined.  Two runs of the same mesh that
+differ only in the member of the degenerate pair returned by the eigensolver
+gave $-0.43100$ and $+0.43731$, with $\lambda_c$, the wave number and
+$\lambda_b/\lambda_c$ identical.  Since $b<0$ means an imperfection-sensitive
+shell and $b>0$ the opposite, this is a substantive limitation of a
+single-mode expansion about a degenerate critical mode, not solver noise; see
+Section~\ref{sec:limits}.
+
+%==============================================================================
+\section{Known limitations}
+\label{sec:limits}
+%==============================================================================
+
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Load control near the bifurcation point.}  The scheme of
+        Section~\ref{sec:nr} reaches $\lambda_b/\lambda_c$ between about
+        $0.93$ and $0.985$ rather than the $0.995$ that Sun~\S2.2 asks for.
+        Arc-length control on the fundamental path, or the extrapolated
+        eigenvalue problem of Sun~Eq.~(27),
+        $[\Kt + (\lambda_c-\lambda_b)\,\partial\Kt/\partial\lambda]\ub_1=0$,
+        would remove the need to sit on top of the bifurcation point.
+  \item \textbf{Degenerate critical modes.}  As discussed in
+        Section~\ref{sec:degenerate}, the condition \eqref{eq:condition}
+        supplies one equation per retained mode while the null space is
+        larger.  The observable consequence is that the sign of $b_{ijkl}$
+        depends on which member of the degenerate pair is retained: the same
+        mesh yields $-0.43100$ or $+0.43731$ according to the basis the
+        eigensolver returns.  Fixing the eigensolver starting vector makes a
+        given run reproducible but does not resolve the ambiguity.  Imposing
+        \eqref{eq:condition} in place of the Euclidean condition is the first
+        thing to try, since it is what determines the null-space component of
+        $\ub_{ij}$; multi-mode Koiter is the consistent treatment.
+  \item \textbf{Symmetrisation of $\phi_{30}$ for distinct modes.}  The
+        identity \eqref{eq:cconst} was established for coinciding mode
+        indices, which covers the single-mode case exercised here; the
+        general multi-mode symmetrisation remains to be worked out.
+  \item \textbf{Quadrature.}  Convergence with respect to the number of Gauss
+        points has been verified: $n_{int}=4$ gives $b$ to within $0.4\%$ of
+        $n_{int}=5$ and $6$, while $n_{int}=2$ under-integrates and produces a
+        rank-deficient element.
+\end{enumerate}
+
+\end{document}
