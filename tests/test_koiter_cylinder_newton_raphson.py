@@ -17,9 +17,10 @@ def test_Sun_et_al():
     #Fig. 3 of that paper. Geometry, laminate and material properties are taken
     #from the text of Section 3.1, and the classical simply-supported boundary
     #condition SS-3 is used, as in the paper.
-    #NOTE ny=40 keeps this test at about 2 min. The finer ny=50 used before
-    #     takes several times longer and gives lambda_c = 0.3367 with n=7
-    #     circumferential waves and b_1111 = -0.04202
+    #NOTE ny=40 keeps this test at about 2 min. The ny=50 mesh takes several
+    #     times longer, and the figures quoted for it below were measured
+    #     before the pre-buckling solve was restricted to the axisymmetric
+    #     subspace, so they have not been repeated since
     ny = 40
     R = 0.2032 # m, R = 203.2 mm
     L = 0.3556 # m, L = 355.6 mm
@@ -52,25 +53,40 @@ def test_Sun_et_al():
     #     Ncl. ANILISA and DIANA give 0.3286 and 0.3244 (Section 3.1).
     #
     #     Since the iterative eigenvalue algorithm of Sun et al. Eqs. (44) to
-    #     (46) was implemented, the expansion really is made about a nonlinear
-    #     pre-buckling state, lambda_b/lambda_c = 0.985 instead of the 0.142
-    #     that solving at the reference load Nxxunit used to give, and this
-    #     model no longer returns the membrane pre-buckling load of 0.3581.
-    #     For reference, the ANILISA n-search with rigorous nonlinear
-    #     pre-buckling and SS-3 gives, for the same shell, 0.337088 at n=7 and
-    #     an absolute minimum of 0.328594 at n=11 (Table 3 of Arbocz, Starnes
-    #     and Nemeth, AIAA-2001-1392). The ny=50 mesh reproduces the n=7 entry
-    #     to 0.1%, at 0.3367. This coarser mesh overshoots the knockdown, so
-    #     the value below is a REGRESSION value for this mesh, not a
-    #     converged one
-    assert np.isclose(Ncr/Ncl, 0.311554, rtol=0.01)
+    #     (46) was implemented, and since the pre-buckling solve was
+    #     restricted to the axisymmetric subspace, the expansion is made about
+    #     a CONVERGED nonlinear pre-buckling state at lambda_b/lambda_c =
+    #     0.996, against the 0.142 that solving at the reference load Nxxunit
+    #     used to give, and this model no longer returns the membrane
+    #     pre-buckling load of 0.3581. For reference, the ANILISA n-search
+    #     with rigorous nonlinear pre-buckling and SS-3 gives, for the same
+    #     shell, 0.337088 at n=7 and an absolute minimum of 0.328594 at n=11
+    #     (Table 3 of Arbocz, Starnes and Nemeth, AIAA-2001-1392). The ny=50
+    #     mesh reproduced the n=7 entry to 0.1%, at 0.3367, before the
+    #     axisymmetric restriction. This mesh buckles with n=10 and overshoots
+    #     the knockdown, so the value below is a REGRESSION value for this
+    #     mesh, not a converged one
+    assert np.isclose(Ncr/Ncl, 0.311449, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
     #NOTE regression value for this mesh, NOT a converged one, and not
     #     comparable to the b = -0.3772 of Table 2 (ANILISA -0.3761, DIANA
-    #     -0.3743), which belongs to the n=11 edge buckling mode. b_1111 is
-    #     far more mesh sensitive than the buckling load
-    assert np.isclose(b_1111, -0.059885, rtol=0.05)
+    #     -0.3743), which belongs to the n=11 edge buckling mode.
+    #
+    #     b_1111 is far more mesh sensitive than the buckling load, and on
+    #     this mesh it is not a property of the shell alone. The critical mode
+    #     has n=10 circumferential waves, so the second order field carries
+    #     the harmonic 2n=20, which ny=40 samples with two nodes per wave.
+    #     Rotating the critical mode inside its own degenerate pair, which
+    #     leaves the pre-buckling state and the buckling load unchanged to
+    #     eleven digits, then moves b_1111 from -0.0008 to 0.2744 over 30
+    #     degrees. That is why canonical_modes brings the pair to its mesh
+    #     aligned member, and it is what makes the value below reproducible
+    #     across BLAS implementations: 2.5e-7 apart between a single threaded
+    #     and a multi threaded run, where it used to differ in sign between
+    #     Windows and the Linux runners. Reproducible is not converged, and
+    #     only a mesh that resolves the harmonic 2n would make it so
+    assert np.isclose(b_1111, 0.285225, rtol=0.05)
 
 
 def test_Arbocz_Starnes_2002():
@@ -82,11 +98,11 @@ def test_Arbocz_Starnes_2002():
     #of the NASA layered composite shell AW-CYL-1-1, laminate [+-45/0/90]s.
     L = 0.3556 # m, 14.0 in = 355.600 mm
     R = 0.20318603 # m, 7.99945 in = 203.18603 mm
-    #NOTE ny=40 keeps this test at about 4 min. The finer ny=60 takes more
-    #     than an hour with the iterative eigenvalue algorithm and gives
-    #     lambda_c = 0.3359 with n=10 circumferential waves and
-    #     |b_1111| = 0.437, which is the result worth quoting, see the NOTE on
-    #     b_1111 below for why only its magnitude is
+    #NOTE ny=40 keeps this test at about 4 min. The ny=60 figures, lambda_c
+    #     = 0.3359 with n=10 circumferential waves and |b_1111| = 0.437, were
+    #     measured before the pre-buckling solve was restricted to the
+    #     axisymmetric subspace, when that mesh took more than an hour because
+    #     the Newton-Raphson kept backing off, and have not been repeated
     ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))
@@ -120,53 +136,52 @@ def test_Arbocz_Starnes_2002():
     #     reference load, lambda_b/lambda_c = 0.07, and this model returned the
     #     MEMBRANE pre-buckling results of the paper, lambda_c = 0.365992
     #     (Level-1 AXBIF, m=1, n=7) and 0.364370 (n=11) or 0.364715 (n=7) with
-    #     Level-2 ANILISA and SS-3. It now reaches lambda_b/lambda_c = 0.93 and
-    #     returns the rigorous nonlinear pre-buckling branch instead, where the
-    #     edge restraint drives the critical mode to a high circumferential
-    #     wave number and drops the load by about 10%. The Level-2 ANILISA
-    #     n-search gives 0.329163 at n=10 and its absolute minimum 0.328594 at
-    #     n=11, and Level-3 STAGS-A gives 0.327759 (n=11, 161x201 mesh). The
-    #     ny=60 mesh gives 0.3359 with n=10, within 2% of the ANILISA n=10
-    #     entry, the rest being the lambda_b/lambda_c = 0.93 that the load
-    #     controlled solver stops at, with lambda_c still decreasing. This
-    #     coarser mesh gives 0.304019, so the value below is a REGRESSION
-    #     value for this mesh and not a converged one
-    assert np.isclose(lambda_c, 0.304019, rtol=0.01)
+    #     Level-2 ANILISA and SS-3. With the pre-buckling solve restricted to
+    #     the axisymmetric subspace it CONVERGES at lambda_b/lambda_c = 0.997,
+    #     where it used to give up around 0.983, and returns the rigorous
+    #     nonlinear pre-buckling branch instead, the edge restraint driving
+    #     the critical mode to a high circumferential wave number and dropping
+    #     the load by about 17%. The Level-2 ANILISA n-search gives 0.329163
+    #     at n=10 and its absolute minimum 0.328594 at n=11, and Level-3
+    #     STAGS-A gives 0.327759 (n=11, 161x201 mesh). This mesh gives
+    #     0.302887, so the value below is a REGRESSION value for this mesh and
+    #     not a converged one
+    assert np.isclose(lambda_c, 0.302887, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    #NOTE regression value for this mesh, NOT a converged one. b_1111 is far
-    #     more mesh sensitive than the buckling load, so it is the ny=60 value
-    #     whose MAGNITUDE, 0.437, is worth comparing with the literature. It
-    #     is of the same order as the b = -0.37605 that Level-2 ANILISA reports
-    #     for the n=11 mode with rigorous nonlinear pre-buckling (alpha =
-    #     0.46663, beta = -0.22174) and as the -0.3772 of Sun et al. Table 2,
-    #     whereas before the pre-buckling state was fixed this test gave
-    #     -0.0598, close to the Level-1 BFACT value of -0.048844 obtained with
-    #     MEMBRANE pre-buckling on the m=1, n=7 mode.
+    #NOTE regression value for this mesh, NOT a converged one, but no longer
+    #     an absurd one: with the pre-buckling state converged, |b_1111| =
+    #     0.411 on this coarse mesh, against the 0.437 that ny=60 gave and of
+    #     the same order as the b = -0.37605 that Level-2 ANILISA reports for
+    #     the n=11 mode with rigorous nonlinear pre-buckling (alpha = 0.46663,
+    #     beta = -0.22174) and as the -0.3772 of Sun et al. Table 2. The same
+    #     mesh returned -1.576 while the Newton-Raphson was still bailing out
+    #     short of the bifurcation point, and -0.0598 before the pre-buckling
+    #     state was fixed at all, close to the Level-1 BFACT value of
+    #     -0.048844 obtained with MEMBRANE pre-buckling on the m=1, n=7 mode.
     #
-    #     Only the magnitude, because the SIGN of b_1111 is not determined
-    #     here. Re-measuring ny=60 after the ARPACK starting vector was fixed
-    #     in solve_eig returned +0.43731 where the same mesh had given
-    #     -0.43100 before, with lambda_c, the wave number and lambda_b/lambda_c
-    #     all unchanged. Only the member of the degenerate buckling mode pair
-    #     that the eigen solver returns differs between the two, and a
-    #     single mode expansion about a degenerate critical mode does not fix
-    #     it. That is a real limitation of the present expansion, not solver
-    #     noise: a negative b means an imperfection sensitive shell and a
-    #     positive one means the opposite, so the sign matters.
+    #     The SIGN is now decided by canonical_modes, which brings the
+    #     degenerate buckling pair to its mesh aligned member, instead of by
+    #     round off in the eigen solver. That makes it reproducible, not
+    #     right: the two members of a pair give different b on a mesh that
+    #     does not resolve the harmonic 2n of the second order field, see the
+    #     NOTE on b_1111 in test_Sun_et_al, and a negative b means an
+    #     imperfection sensitive shell while a positive one means the
+    #     opposite. Settling the sign needs a mesh that resolves 2n, or the
+    #     multi mode expansion.
     #
     #     Imposing the stiffness weighted orthogonality of Sun et al. Eq. (33)
-    #     on the second order field, which is what the code now does, does NOT
-    #     determine it. Measured on this case, going from the Euclidean
-    #     condition to Eq. (33) moves the second order field itself by 6.5e-7
-    #     relative and b_1111 from -1.57604660 to -1.57604530: the two
-    #     conditions are numerically near-coincident here, the null space
-    #     component of uab that they disagree on being small to begin with.
-    #     Reinforcing that, b_ijkl sees uab through phi3_ab @ uab, whose
-    #     contraction with the buckling modes is the numerator of a_ijk, and
-    #     a_ijk vanishes for this symmetric bifurcation. What is left is a
-    #     multi mode expansion
-    assert np.isclose(b_1111, -1.576047, rtol=0.05)
+    #     on the second order field, which is what the code does, does NOT
+    #     settle it either. Measured on this case before the axisymmetric
+    #     restriction, going from the Euclidean condition to Eq. (33) moved
+    #     the second order field by 6.5e-7 relative and b_1111 from
+    #     -1.57604660 to -1.57604530: the two conditions are numerically
+    #     near-coincident here, the null space component of uab that they
+    #     disagree on being small to begin with. Reinforcing that, b_ijkl sees
+    #     uab through phi3_ab @ uab, whose contraction with the buckling modes
+    #     is the numerator of a_ijk, and a_ijk vanishes for this symmetric
+    #     bifurcation
+    assert np.isclose(b_1111, 0.410664, rtol=0.05)
 
 if __name__ == '__main__':
     test_Arbocz_Starnes_2002()
