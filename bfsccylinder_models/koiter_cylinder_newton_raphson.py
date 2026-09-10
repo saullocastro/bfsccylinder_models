@@ -516,11 +516,12 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
 
 
-    #NOTE I noticed that, in order to get DIANA's result, the linear
-    #     pre-buckling state ignores all nonlinear quantities in the
-    #     calculations of the strains and its derivatives
-    #     Therefore, I am using this pythflag that multiply the referred nonlinear
-    #     terms
+    #NOTE this flag multiplies every nonlinear contribution to the
+    #     pre-buckling strains and to their derivatives. With NLprebuck=False
+    #     the pre-buckling state is the linear elastic solution, the
+    #     pre-buckling path is exactly linear in the load parameter, and those
+    #     contributions have to be absent; with NLprebuck=True they are the
+    #     terms that carry the nonlinear pre-buckling behaviour
     flag = NLprebuck
 
     # higher-order tensors for elements
@@ -742,11 +743,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
 
-    #TODO phi2uu = phi2[bu, :][:, bu]
-    #if NLprebuck:
-        #phi2 = KC + KG #TODO with KG?
-        #phi2uu = KCuu + KGuu #TODO with KGuu?
-    #else:
     #NOTE phi2 must be the SAME operator whose null vector is the buckling
     #     mode, so it is built from the KC and KG of the eigenvalue analysis,
     #     both evaluated at the converged pre-buckling state, and scaled by
@@ -777,7 +773,11 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         for modej in range(koiter_num_modes):
             #NOTE phi3_ij = phi3_ji even in the asym case
             force2ndorder_ij[(modei, modej)] = -1/2.*phi3_ab[(modei, modej)]
-            #NOTE I tried to add the contributions of a_ijk, but the correlation of b-factor in Diana was worse
+            #NOTE the a_ijk contribution below is kept. For the symmetric
+            #     bifurcation of a cylinder under axial compression a_ijk is
+            #     zero to within round off, of the order of 1e-5 against a
+            #     b_ijkl of order 1, so it changes nothing here; it matters
+            #     only for an asymmetric bifurcation
             for modek in range(koiter_num_modes):
                 lambda_k = lambda_a[modek]
                 a_kij = a_abc[(modek, modei, modej)]
@@ -789,39 +789,72 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     space, so the second order fields cannot be obtained from a plain
     #     spsolve followed by a Gram-Schmidt projection. They come from the
     #     bordered system
-    #         [phi2  Q] [uab  ]   [force2ndorder]
-    #         [Q^T   0] [alpha] = [      0      ]
-    #     which is non singular and enforces the orthogonality to the modes
-    #     while solving. Q holds the buckling modes.
-    #TODO the border enforces the Euclidean orthogonality Q^T uab = 0, which
-    #     is the condition that the previous Gram-Schmidt step imposed. The
-    #     orthogonality condition of Sun et al. Eq. (18), in finite element
-    #     form Eq. (33), is weighted by the stiffness matrices and is
-    #     inhomogeneous, and still has to replace this one
+    #         [phi2  Nsp] [uab  ]   [force2ndorder]
+    #         [W^T   0  ] [alpha] = [    -cst     ]
+    #     whose column border Nsp spans the null space of phi2, which makes it
+    #     non singular, and whose row border W carries the orthogonality
+    #     conditions imposed on the second order fields.
+    #
+    #     Those conditions are the ones of Sun et al. Eq. (18), in finite
+    #     element form Eq. (33),
+    #         q_k^T [KD(qb, qb_dot) + KG(sigma_b_dot)] uab
+    #             + 1/2 q_k^T BNL^T(q_k) H BNL(q_k) qb_dot = 0
+    #     The first term is the load parameter derivative of phi2 contracted
+    #     with mode k on one slot, which is exactly phi20_a[k], and the second
+    #     is a constant, so the condition is weighted by the stiffness
+    #     matrices and inhomogeneous. A Gram-Schmidt projection, or an
+    #     Euclidean border Q^T uab = 0, imposes neither
+    nu = int(bu.sum())
+
     #NOTE the buckling modes of a cylinder come in degenerate pairs, one for
     #     each sign of the circumferential wave number, so the null space of
-    #     phi2 is spanned by every eigenvector whose multiplier is equal to
-    #     the critical one. Bordering with the Koiter modes alone would leave
-    #     the bordered system singular along the remaining ones
-    nu = int(bu.sum())
+    #     phi2 is spanned by every eigenvector whose multiplier equals the
+    #     critical one, not only by the Koiter modes
     cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
     for j in range(num_eigvals):
         if abs(mu[j] - mu[0]) <= 1.e-3*abs(mu[0]):
             cols.append(eigvecsu[:, j])
-    Qfull = np.asarray(cols).T
-    #NOTE an orthonormal basis of that space, dropping the dependent columns
-    Qo, r = np.linalg.qr(Qfull)
+    Qo, r = np.linalg.qr(np.asarray(cols).T)
     keep = np.abs(np.diag(r)) > 1.e-10*np.abs(np.diag(r)).max()
-    Q = Qo[:, keep]
-    print('# null space of phi2 deflated with %d vectors' % Q.shape[1])
-    Qs = csc_matrix(Q)
-    bordered = bmat([[phi2uu, Qs], [Qs.T, None]], format='csc')
+    Nsp = Qo[:, keep]
+    print('# null space of phi2 deflated with %d vectors' % Nsp.shape[1])
+
+    #NOTE one row of Eq. (33) per Koiter mode. Whatever is left of the null
+    #     space, the degenerate partners of those modes, is outside the single
+    #     mode theory and keeps the Euclidean condition
+    W = np.zeros_like(Nsp)
+    for modek in range(koiter_num_modes):
+        W[:, modek] = phi20_a[modek][bu]
+    extra = Nsp.shape[1] - koiter_num_modes
+    if extra > 0:
+        P = Nsp.copy()
+        for modek in range(koiter_num_modes):
+            v = ua[modek][bu]
+            P = P - np.outer(v, v @ P)/(v @ v)
+        W[:, koiter_num_modes:] = np.linalg.svd(
+                P, full_matrices=False)[0][:, :extra]
+
+    bordered = bmat([[phi2uu, csc_matrix(Nsp)],
+                     [csc_matrix(W).T, None]], format='csc')
 
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
-            rhs = np.zeros(nu + Q.shape[1])
+            rhs = np.zeros(nu + Nsp.shape[1])
             rhs[:nu] = force2ndorder_ij[(modei, modej)][bu]
+            for modek in range(koiter_num_modes):
+                #NOTE the constant of Eq. (33). With every mode index equal,
+                #     the six contributions summed into phi30_ab coincide, so
+                #     that with the 1/2 carried by the quadrature weight
+                #     phi30_ab @ ua is three times
+                #     <N[L2(u1)], L11(u0_dot, u1)>, and Eq. (33) takes one
+                #     half of it
+                #TODO for koiter_num_modes > 1 the symmetrization of phi30
+                #     over distinct modes still has to be worked out, the
+                #     expression below is only exact when modei, modej and
+                #     modek coincide
+                rhs[nu + modek] = -(phi30_ab[(modei, modej)]
+                        @ ua[modek])/6.
             sol = spsolve(bordered, rhs)
             uijbar = np.zeros(N)
             uijbar[bu] = sol[:nu]

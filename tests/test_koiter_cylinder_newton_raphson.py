@@ -153,10 +153,19 @@ def test_Arbocz_Starnes_2002():
     #     single mode expansion about a degenerate critical mode does not fix
     #     it. That is a real limitation of the present expansion, not solver
     #     noise: a negative b means an imperfection sensitive shell and a
-    #     positive one means the opposite, so the sign matters. Imposing the
-    #     stiffness weighted orthogonality of Eq. (33) on the second order
-    #     field, in place of the Euclidean one used now, and ultimately a
-    #     multi mode expansion, are what should determine it
+    #     positive one means the opposite, so the sign matters.
+    #
+    #     Imposing the stiffness weighted orthogonality of Sun et al. Eq. (33)
+    #     on the second order field, which is what the code now does, does NOT
+    #     determine it. Measured on this case, going from the Euclidean
+    #     condition to Eq. (33) moves the second order field itself by 6.5e-7
+    #     relative and b_1111 from -1.57604660 to -1.57604530: the two
+    #     conditions are numerically near-coincident here, the null space
+    #     component of uab that they disagree on being small to begin with.
+    #     Reinforcing that, b_ijkl sees uab through phi3_ab @ uab, whose
+    #     contraction with the buckling modes is the numerator of a_ijk, and
+    #     a_ijk vanishes for this symmetric bifurcation. What is left is a
+    #     multi mode expansion
     assert np.isclose(b_1111, -1.576047, rtol=0.05)
 
 if __name__ == '__main__':
