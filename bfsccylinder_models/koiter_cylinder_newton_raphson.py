@@ -16,6 +16,8 @@ from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
         KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder.utils import assign_constant_ABD
+from bfsccylinder_models.cyclic_symmetry import (mesh_order,
+        project_axisymmetric, canonical_modes)
 
 num_nodes = 4
 
@@ -182,7 +184,24 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     cg_x0 = uu.copy()
 
     u0[bu] = uu
-    u0_lin = u0.copy()
+
+    #NOTE the fundamental path of a perfect cylinder under uniform axial
+    #     compression is axisymmetric, and every buckling mode that makes the
+    #     tangent stiffness matrix singular is not. Restricting the
+    #     pre-buckling solve to the axisymmetric subspace therefore keeps it
+    #     clear of the whole near critical cluster, and not only of the few
+    #     modes that happen to have been computed, which is what the
+    #     Newton-Raphson needs in order to converge at lambda_b/lambda_c close
+    #     to 1. It is also what the reference solutions do, AXBIF and ANILISA
+    #     both solving an axisymmetric pre-buckling problem
+    axi_order = mesh_order(x, y, nx, ny)
+    axi_imid = np.argmin(np.abs(xlin - L/2.))
+
+    def project_axi(u):
+        return project_axisymmetric(u, axi_order, axi_imid, DOF)
+
+    u0_lin = project_axi(u0)
+    u0 = u0_lin.copy()
 
     def assemble_KG(u):
         KGv[:] = 0
@@ -195,16 +214,17 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
         The starting vector is fixed on purpose. ARPACK keeps its random seed
         in a SAVEd variable, so without one the basis it returns for a
-        degenerate eigenspace, and the buckling modes of a cylinder are
-        degenerate pairs, depends on how many eigenvalue problems were solved
-        before in the same process. The second order field is obtained by
-        deflating that basis, so b_ijkl would otherwise change with the order
-        in which the analyses run.
+        degenerate eigenspace depends on how many eigenvalue problems were
+        solved before in the same process. That alone does not pin the basis
+        down, round off inside the eigen solver being enough to rotate it,
+        which is what canonical_modes is for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
         eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
                 tol=1e-6, v0=v0)
-        return eigvals, eigvecsu, -1/eigvals
+        mu = -1/eigvals
+        return eigvals, canonical_modes(mu, eigvecsu, bu,
+                axi_order, DOF), mu
 
     def bordered_solve(Auu, rhs, Q):
         """Solve Auu x = rhs with x orthogonal to the columns of Q
@@ -298,7 +318,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             while True:
                 duu = bordered_solve(KTuu, -Ri[bu], Qdefl)
                 du[bu] = duu
-                u = ui + du
+                #NOTE the correction is projected, not merely deflated: the
+                #     tangent stiffness matrix is singular along the whole
+                #     near critical cluster and not only along Qdefl
+                u = project_axi(ui + du)
                 fint = calc_fint(u, fint)
                 Ri = fint - fext_b
                 crisfield_test = scaling(Ri[bu], D)/max(
@@ -343,7 +366,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             for the same reason as in solve_prebuckling"""
             u0dot = np.zeros(N, dtype=DOUBLE)
             u0dot[bu] = bordered_solve(KT[bu, :][:, bu], fext[bu], Qdefl)
-            return u0dot
+            return project_axi(u0dot)
 
         lambda_b = 1.
         u0 = u0_lin.copy()
