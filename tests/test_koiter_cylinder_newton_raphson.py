@@ -19,7 +19,7 @@ def test_Sun_et_al():
     #condition SS-3 is used, as in the paper.
     #NOTE ny=40 keeps this test at about 2 min. The finer ny=50 used before
     #     takes several times longer and gives lambda_c = 0.3367 with n=7
-    #     circumferential waves and b_1111 = -0.0420
+    #     circumferential waves and b_1111 = -0.04202
     ny = 40
     R = 0.2032 # m, R = 203.2 mm
     L = 0.3556 # m, L = 355.6 mm
@@ -85,8 +85,8 @@ def test_Arbocz_Starnes_2002():
     #NOTE ny=40 keeps this test at about 4 min. The finer ny=60 takes more
     #     than an hour with the iterative eigenvalue algorithm and gives
     #     lambda_c = 0.3359 with n=10 circumferential waves and
-    #     b_1111 = -0.4310, which is the result worth quoting, see the NOTE on
-    #     b_1111 below
+    #     |b_1111| = 0.437, which is the result worth quoting, see the NOTE on
+    #     b_1111 below for why only its magnitude is
     ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))
@@ -136,22 +136,27 @@ def test_Arbocz_Starnes_2002():
     print('b_1111', b_1111)
     #NOTE regression value for this mesh, NOT a converged one. b_1111 is far
     #     more mesh sensitive than the buckling load, so it is the ny=60 value
-    #     of about -0.43 that is worth comparing with the literature. That one
+    #     whose MAGNITUDE, 0.437, is worth comparing with the literature. It
     #     is of the same order as the b = -0.37605 that Level-2 ANILISA reports
     #     for the n=11 mode with rigorous nonlinear pre-buckling (alpha =
     #     0.46663, beta = -0.22174) and as the -0.3772 of Sun et al. Table 2,
     #     whereas before the pre-buckling state was fixed this test gave
     #     -0.0598, close to the Level-1 BFACT value of -0.048844 obtained with
-    #     MEMBRANE pre-buckling on the m=1, n=7 mode. The difference that
-    #     remains at ny=60 comes from the mode being n=10 instead of n=11,
-    #     from lambda_b/lambda_c stopping at 0.93, and from the orthogonality
-    #     condition of the second order field still being the Euclidean one
-    #     instead of Eq. (33).
+    #     MEMBRANE pre-buckling on the m=1, n=7 mode.
     #
-    #     The ny=50 and ny=60 numbers quoted in these NOTEs were measured
-    #     before the ARPACK starting vector was fixed in solve_eig, so they
-    #     may shift a little once re-measured, the coarse mesh values here
-    #     moved by a few percent
+    #     Only the magnitude, because the SIGN of b_1111 is not determined
+    #     here. Re-measuring ny=60 after the ARPACK starting vector was fixed
+    #     in solve_eig returned +0.43731 where the same mesh had given
+    #     -0.43100 before, with lambda_c, the wave number and lambda_b/lambda_c
+    #     all unchanged. Only the member of the degenerate buckling mode pair
+    #     that the eigen solver returns differs between the two, and a
+    #     single mode expansion about a degenerate critical mode does not fix
+    #     it. That is a real limitation of the present expansion, not solver
+    #     noise: a negative b means an imperfection sensitive shell and a
+    #     positive one means the opposite, so the sign matters. Imposing the
+    #     stiffness weighted orthogonality of Eq. (33) on the second order
+    #     field, in place of the Euclidean one used now, and ultimately a
+    #     multi mode expansion, are what should determine it
     assert np.isclose(b_1111, -1.576047, rtol=0.05)
 
 if __name__ == '__main__':
