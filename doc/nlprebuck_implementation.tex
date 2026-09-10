@@ -473,6 +473,37 @@ from the null-space directions orthogonal to the retained modes.  This is a
 choice, not a result; the consistent treatment of a degenerate critical mode
 is the multi-mode Koiter expansion.
 
+\subsection{What the weighted condition does, and does not, change}
+
+Condition \eqref{eq:condition} is the correct one and replaces a Gram--Schmidt
+projection that was neither weighted nor inhomogeneous.  For the cases
+considered here, however, it changes almost nothing.  Running the same
+analysis under the two conditions, with everything else identical, gives
+\[
+  \frac{\lVert\ub_{ij}^{\text{Eq.}(33)}-\ub_{ij}^{\text{eucl}}\rVert}
+       {\lVert\ub_{ij}\rVert} = 6.5\times10^{-7},
+  \qquad
+  b_{1111}: -1.57604660 \;\rightarrow\; -1.57604530 .
+\]
+The second-order field itself barely moves, so the two conditions are
+numerically near-coincident for this problem: the null-space component of
+$\ub_{ij}$ on which they disagree is small to begin with.
+
+A second reason reinforces this, and would survive a larger difference.
+Condition \eqref{eq:condition} fixes only the component of $\ub_{ij}$ along
+$\ker\phi_2$, and $b_{ijkl}$ sees $\ub_{ij}$ through the contractions
+$\phi_{3,ij}\cdot\ub_{kl}$; but $\phi_{3,ij}$ contracted with a buckling mode
+is precisely the numerator of $a_{ijk}$ in \eqref{eq:a}.  For the symmetric
+bifurcation of a cylinder under axial compression $a_{ijk}$ vanishes,
+measured values being of order $10^{-5}$ against a $b_{ijkl}$ of order unity,
+so $\phi_{3,ij}$ is nearly orthogonal to the null space.
+
+Either way the conclusion is the same: the weighted condition is necessary for
+correctness, but it is not the resolution of the ambiguity discussed above,
+where the spread between two members of the degenerate pair remains a factor
+of $1.5$.  For an asymmetric bifurcation, with $a_{ijk}\neq0$, it would carry
+more weight.
+
 A related practical point: the basis that an iterative eigensolver returns for
 a degenerate eigenspace is arbitrary.  ARPACK keeps its random seed in a saved
 variable, so without an explicit starting vector the basis --- and with it
@@ -609,10 +640,10 @@ Section~\ref{sec:limits}.
         depends on which member of the degenerate pair is retained: the same
         mesh yields $-0.43100$ or $+0.43731$ according to the basis the
         eigensolver returns.  Fixing the eigensolver starting vector makes a
-        given run reproducible but does not resolve the ambiguity.  Imposing
-        \eqref{eq:condition} in place of the Euclidean condition is the first
-        thing to try, since it is what determines the null-space component of
-        $\ub_{ij}$; multi-mode Koiter is the consistent treatment.
+        given run reproducible but does not resolve the ambiguity.  Neither
+        does \eqref{eq:condition}: see the remark at the end of
+        Section~\ref{sec:ortho}.  Multi-mode Koiter is the consistent
+        treatment.
   \item \textbf{Symmetrisation of $\phi_{30}$ for distinct modes.}  The
         identity \eqref{eq:cconst} was established for coinciding mode
         indices, which covers the single-mode case exercised here; the
