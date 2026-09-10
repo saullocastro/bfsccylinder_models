@@ -18,9 +18,8 @@ def test_Sun_et_al():
     #from the text of Section 3.1, and the classical simply-supported boundary
     #condition SS-3 is used, as in the paper.
     #NOTE ny=40 keeps this test at about 2 min. The ny=50 mesh takes several
-    #     times longer, and the figures quoted for it below were measured
-    #     before the pre-buckling solve was restricted to the axisymmetric
-    #     subspace, so they have not been repeated since
+    #     times longer and gives Ncr/Ncl = 0.335364 with n=7 circumferential
+    #     waves and b_1111 = -0.041760
     ny = 40
     R = 0.2032 # m, R = 203.2 mm
     L = 0.3556 # m, L = 355.6 mm
@@ -62,10 +61,9 @@ def test_Sun_et_al():
     #     with rigorous nonlinear pre-buckling and SS-3 gives, for the same
     #     shell, 0.337088 at n=7 and an absolute minimum of 0.328594 at n=11
     #     (Table 3 of Arbocz, Starnes and Nemeth, AIAA-2001-1392). The ny=50
-    #     mesh reproduced the n=7 entry to 0.1%, at 0.3367, before the
-    #     axisymmetric restriction. This mesh buckles with n=10 and overshoots
-    #     the knockdown, so the value below is a REGRESSION value for this
-    #     mesh, not a converged one
+    #     mesh reproduces that n=7 entry to 0.5%, at 0.335364. This mesh
+    #     buckles with n=10 instead and overshoots the knockdown, so the value
+    #     below is a REGRESSION value for this mesh, not a converged one
     assert np.isclose(Ncr/Ncl, 0.311449, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
@@ -85,7 +83,13 @@ def test_Sun_et_al():
     #     across BLAS implementations: 2.5e-7 apart between a single threaded
     #     and a multi threaded run, where it used to differ in sign between
     #     Windows and the Linux runners. Reproducible is not converged, and
-    #     only a mesh that resolves the harmonic 2n would make it so
+    #     only a mesh that resolves the harmonic 2n would make it so.
+    #
+    #     The ny=50 mesh is not that mesh either, it is a mesh that buckles
+    #     with n=7, where b_1111 comes out -0.041760. The two are not two
+    #     approximations of one number, they belong to different critical
+    #     modes, which is the mesh sensitivity of the buckling mode itself
+    #     showing up on top of the one of b_1111
     assert np.isclose(b_1111, 0.285225, rtol=0.05)
 
 
