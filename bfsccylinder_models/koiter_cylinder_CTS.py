@@ -16,6 +16,8 @@ from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
         update_fint, DOF, DOUBLE, INT, KC0_SPARSE_SIZE, KCNL_SPARSE_SIZE,
         KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
+from bfsccylinder_models.cyclic_symmetry import (mesh_order,
+        canonical_modes)
 
 num_nodes = 4
 
@@ -456,6 +458,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
             tol=1e-6)
     load_mult = -1/eigvals
+    #NOTE the buckling modes of a cylinder come in degenerate pairs and the
+    #     member of a pair that the eigen solver returns is decided by round
+    #     off, while b_ijkl is not invariant under the rotation that relates
+    #     them, so the pairs are brought to the mesh aligned member here
+    eigvecsu = canonical_modes(load_mult, eigvecsu, bu,
+            mesh_order(x, y, nx, ny), DOF)
     print('# finished eigenvalue analysis')
 
     Pcr = load_mult[0]*Nxxunit*circ

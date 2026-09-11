@@ -9,7 +9,67 @@ from bfsccylinder.quadrature import get_points_weights
 
 def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
         h_tow, desvars, funcVAT, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
-        num_eigvals=2):
+        num_eigvals=2, lobpcg_tol=1e-5):
+    """
+    Linear buckling analysis of a VAT cylinder with properties changing over
+    the axial direction (x)
+
+    Assumptions:
+    - classical shell theory (when BFS element is used)
+    - monolithic laminated properties (only one material for the whole laminate)
+    - displacement controlled
+    - returns the critical buckling load in consistent force units
+
+    Parameters
+    ----------
+    L : float
+        Cylinder length.
+    R : float
+        Cylinder radius.
+    nx : int
+        Number of nodes along axial direction (odd number recommended).
+    ny : int
+        Number of nodes along circumferential direction (even number
+        recommended).
+    E11, E22, nu12, G12 : float
+        Orthotropic material properties.
+    rho : float
+        Density of orthotropic material.
+    h_tow : float
+        FW tow thickness.
+    desvars : list
+        Each element of desvars is another list containing the variables
+        compatible with the VAT function ``funcVAT`` being used.
+    funcVAT : function
+        VAT function in the form ``f(x, xmax, thetas)``, with ``x`` being the
+        axial direction, ``xmax`` the maximum value of ``x`` in the domain, and
+        ``thetas`` the angle values at the control points, such that the
+        ``desvars`` parameter is a sequence of ``thetas``.
+    clamped : bool, optional
+        ``True`` if clamped, ``False`` if simply supported.
+    cg_x0 : array, optional
+        Initial guess for static solver.
+    lobpcg_X : array, optional
+        Initial guess for eigenvectors in the eigenvalue analysis.
+    nint : int, optional
+        Number of integration points per direction.
+    num_eigvals : int, optional
+        Number of eigenvalues to extract.
+    lobpcg_tol : float, optional
+        Tolerance passed to ``scipy.sparse.linalg.lobpcg`` in the eigenvalue
+        analysis.
+
+    Returns
+    -------
+    out : dict
+        out['Pcr'] = critical buckling load
+        out['cg_x0'] = static initial guess
+        out['lobpcg_X'] = eigenvalue initial guess
+        out['mass'] = mass
+        out['eigvals'] = eigenvalues
+        out['eigvecs'] = eigenvectors
+
+    """
     # geometry our FW cylinders
     circ = 2*pi*R # m
 
@@ -205,10 +265,8 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     else:
         Xu = lobpcg_X
 
-    #NOTE default tolerance is too large
-    tol = 1e-5
     eigvals, eigvecsu, hist = lobpcg(A=PREC*Kuu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
-            maxiter=maxiter, retResidualNormsHistory=True, tol=tol)
+            maxiter=maxiter, retResidualNormsHistory=True, tol=lobpcg_tol)
     load_mult = eigvals
     if not len(hist) <= maxiter:
         print('#   failed with lobpcg()')
