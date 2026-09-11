@@ -17,7 +17,7 @@ from bfsccylinder.sanders import (BFSCCylinderSanders, update_KC0, update_KCNL,
 from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
-        project_axisymmetric, canonical_modes)
+        axisymmetric_basis, project_axisymmetric, canonical_modes)
 
 num_nodes = 4
 
@@ -197,8 +197,35 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     axi_order = mesh_order(x, y, nx, ny)
     axi_imid = np.argmin(np.abs(xlin - L/2.))
 
+    Baxi, buaxi = axisymmetric_basis(axi_order, bu, DOF)
+
     def project_axi(u):
         return project_axisymmetric(u, axi_order, axi_imid, DOF)
+
+    def solve_axi(KT, rhs):
+        """Solve KT du = rhs for the axisymmetric du, Eq. of the subspace
+
+        The Galerkin projection onto the axisymmetric basis, and not the full
+        solve followed by a projection, for the reason given in
+        axisymmetric_basis. The reduced matrix is small enough to be dense
+        """
+        Kr = (Baxi.T @ KT @ Baxi).toarray()
+        rr = Baxi.T @ rhs
+        a = np.zeros(Baxi.shape[1], dtype=DOUBLE)
+        Krf = Kr[np.ix_(buaxi, buaxi)]
+        #NOTE the reduced coordinates are nodal displacements next to nodal
+        #     derivatives, whose stiffness entries differ by orders of
+        #     magnitude, and the reduced matrix reaches a condition number of
+        #     4e12 because of it. The sparse solver used elsewhere
+        #     equilibrates internally, this dense one does not, so it is
+        #     scaled symmetrically here, which brings the condition number
+        #     down to 3e2. Measured on the ny=60 Arbocz and Starnes case it
+        #     leaves every iterate unchanged to ten digits, the graded matrix
+        #     being solved accurately by the pivoting alone; it is kept as a
+        #     guard rather than as a fix
+        d = 1/np.sqrt(np.abs(Krf.diagonal()))
+        a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :], d*rr[buaxi])
+        return Baxi @ a
 
     u0_lin = project_axi(u0)
     u0 = u0_lin.copy()
@@ -225,22 +252,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         mu = -1/eigvals
         return eigvals, canonical_modes(mu, eigvecsu, bu,
                 axi_order, DOF), mu
-
-    def bordered_solve(Auu, rhs, Q):
-        """Solve Auu x = rhs with x orthogonal to the columns of Q
-
-        Used wherever Auu is singular, or nearly so, along Q. The bordered
-        system is non singular there and the Lagrange multipliers absorb the
-        component of rhs that lies in that space.
-        """
-        if Q is None or Q.shape[1] == 0:
-            return spsolve(Auu, rhs)
-        n = Auu.shape[0]
-        Qs = csc_matrix(Q)
-        A = bmat([[Auu, Qs], [Qs.T, None]], format='csc')
-        b = np.zeros(n + Q.shape[1])
-        b[:n] = rhs
-        return spsolve(A, b)[:n]
 
     if NLprebuck:
         print('#    initiating nonlinear pre-buckling state')
@@ -276,25 +287,22 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         D = KC0uu.diagonal() # at beginning of load increment
         epsilon = NR_eps
 
-        def solve_prebuckling(lambda_b, ui, Qdefl=None):
+        def solve_prebuckling(lambda_b, ui):
             """Pre-buckling state at the load level lambda_b*Nxxunit
 
-            Qdefl holds the buckling modes estimated so far. The fundamental
-            path of a perfect cylinder under axial compression has no
-            component along them, they are not axisymmetric, but close to the
-            bifurcation point the tangent stiffness matrix is nearly singular
-            in those directions, so any round off component of the residual
-            there is amplified and the iteration diverges. Deflating them
-            keeps the correction on the fundamental path.
+            The correction is solved for in the axisymmetric subspace, where
+            the fundamental path of a perfect cylinder under axial
+            compression lives and where the tangent stiffness matrix stays
+            regular right up to the bifurcation point, every buckling mode
+            that makes it singular being non-axisymmetric. The convergence
+            test below is still the one of the full residual.
             """
             fext_b = lambda_b*fext
             fint = np.zeros(N)
             fint = calc_fint(ui, fint)
             Ri = fint - fext_b
-            du = np.zeros(N)
             u = ui.copy()
             KT = calc_KT(ui)
-            KTuu = KT[bu, :][:, bu]
             iteration = 0
             best_test = np.inf
             u_best = ui.copy()
@@ -316,12 +324,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                         'bifurcation point' % (reason, lambda_b))
 
             while True:
-                duu = bordered_solve(KTuu, -Ri[bu], Qdefl)
-                du[bu] = duu
-                #NOTE the correction is projected, not merely deflated: the
-                #     tangent stiffness matrix is singular along the whole
-                #     near critical cluster and not only along Qdefl
-                u = project_axi(ui + du)
+                u = ui + solve_axi(KT, -Ri)
                 fint = calc_fint(u, fint)
                 Ri = fint - fext_b
                 crisfield_test = scaling(Ri[bu], D)/max(
@@ -347,7 +350,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 if iteration > NR_maxiter:
                     return give_up('did not converge')
                 KT = calc_KT(u)
-                KTuu = KT[bu, :][:, bu]
                 ui = u.copy()
 
         #NOTE Iterative eigenvalue algorithm of Sun et al. (2020), Eqs. (44)
@@ -358,15 +360,13 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         #     lambda_b/lambda_c of the order of 0.1, where the nonlinear
         #     pre-buckling deformation caused by the edge restraint has not
         #     developed yet, and gives back the membrane pre-buckling result
-        def calc_u0dot(KT, Qdefl=None):
+        def calc_u0dot(KT):
             """Eq. (29), rate of the pre-buckling state with respect to the
             load parameter. Assuming instead that the pre-buckling path is
             linear in lambda, u0(lambda) = lambda*u0, would make this equal
-            to the pre-buckling state itself. The buckling modes are deflated
-            for the same reason as in solve_prebuckling"""
-            u0dot = np.zeros(N, dtype=DOUBLE)
-            u0dot[bu] = bordered_solve(KT[bu, :][:, bu], fext[bu], Qdefl)
-            return project_axi(u0dot)
+            to the pre-buckling state itself. Solved in the axisymmetric
+            subspace for the same reason as in solve_prebuckling"""
+            return solve_axi(KT, fext)
 
         lambda_b = 1.
         u0 = u0_lin.copy()
@@ -383,11 +383,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             KCuu = KC[bu, :][:, bu]
             KGuu = KG[bu, :][:, bu]
             eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
-            #NOTE the near critical eigenvectors, deflated from every solve
-            #     with the tangent stiffness matrix from here on
-            crit = [j for j in range(num_eigvals)
-                    if abs(mu[j] - mu[0]) <= 1.e-2*abs(mu[0])]
-            Qdefl = np.linalg.qr(eigvecsu[:, crit])[0]
             lambda_c = lambda_b*mu[0] # Eq. (46)
             print('#    iteration', iteration, 'lambda_b', lambda_b,
                     'lambda_c', lambda_c, 'lambda_b/lambda_c',
@@ -410,11 +405,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 if KT is None:
                     guess = u0*(lambda_b_new/lambda_b)
                 else:
-                    guess = u0 + calc_u0dot(KT, Qdefl)*(lambda_b_new
-                            - lambda_b)
+                    guess = u0 + calc_u0dot(KT)*(lambda_b_new - lambda_b)
                 try:
-                    u0_new, KT_new = solve_prebuckling(lambda_b_new, guess,
-                            Qdefl)
+                    u0_new, KT_new = solve_prebuckling(lambda_b_new, guess)
                     break
                 except RuntimeError:
                     eta *= 0.5
@@ -427,7 +420,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 #NOTE no further progress possible with load control
                 break
             lambda_prev = lambda_b
-            u0dot_prev = u0_lin if KT is None else calc_u0dot(KT, Qdefl)
+            u0dot_prev = u0_lin if KT is None else calc_u0dot(KT)
             u0, KT = u0_new, KT_new
             lambda_b = lambda_b_new
             KC = KC0 + assemble_KCNL(u0)
@@ -444,7 +437,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
         if KT is None:
             KT = calc_KT(u0)
-        u0dot = calc_u0dot(KT, Qdefl)
+        u0dot = calc_u0dot(KT)
 
         #NOTE Eqs. (34) and (35), second derivative by a backward difference
         #     against the load step preceding the converged one, which is what
