@@ -375,6 +375,13 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         #     difference of Eq. (35)
         lambda_prev = None
         u0dot_prev = None
+        #NOTE the buckling load of the previous load step, for the
+        #     sensitivity dlambda_c/dlambda_b below, and the whole state of
+        #     that step, to fall back on if a step lands past the bifurcation
+        #     point anyway
+        lambda_c_prev = None
+        back = None
+        eta_cap = 1.
         KC = KC0 + assemble_KCNL(u0)
         KG = assemble_KG(u0)
         print('# starting iterative eigenvalue analysis')
@@ -387,14 +394,58 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             print('#    iteration', iteration, 'lambda_b', lambda_b,
                     'lambda_c', lambda_c, 'lambda_b/lambda_c',
                     lambda_b/lambda_c)
-            if (lambda_c - lambda_b)/lambda_c <= NLprebuck_eps1: # Eq. (45)
+            #NOTE Eq. (45) measures the distance to the bifurcation point
+            #     from below only. Once lambda_b passes lambda_c its left hand
+            #     side turns negative and the test accepts the state whatever
+            #     the overshoot, so the distance is taken in absolute value
+            gap = (lambda_c - lambda_b)/lambda_c
+            if abs(gap) <= NLprebuck_eps1: # Eq. (45)
                 print('#    converged')
                 converged = True
                 break
+            if gap < 0:
+                #NOTE past the bifurcation point by more than the tolerance.
+                #     The fundamental path is still there, the pre-buckling
+                #     solve being restricted to the axisymmetric subspace,
+                #     but the expansion is meant to be made on the near side
+                #     of it, so the load step is taken again shorter
+                print('#    overshot to lambda_b/lambda_c %r, stepping back'
+                        % (lambda_b/lambda_c))
+                eta_cap *= 0.5
+                if back is None or eta_cap < 1.e-2:
+                    break
+                (lambda_b, u0, KT, lambda_prev, u0dot_prev,
+                        lambda_c_prev) = back
+                back = None
+                KC = KC0 + assemble_KCNL(u0)
+                KG = assemble_KG(u0)
+                continue
             #NOTE eta=0.8 in the first iteration to approach the neighbourhood
-            #     of the buckling load quickly, eta=0.5 afterwards to avoid
-            #     overshooting it and getting a negative eigenvalue
+            #     of the buckling load quickly, eta=0.5 afterwards
             eta = 0.8 if iteration == 1 else 0.5
+            #NOTE Eq. (44) advances lambda_b by a fixed fraction of the
+            #     distance to lambda_c, but lambda_c moves as well, and
+            #     downwards: with s = dlambda_c/dlambda_b the step lands past
+            #     the bifurcation point whenever eta > 1/(1 - s). Capping eta
+            #     at a fraction of that, with s estimated from the two
+            #     previous load steps, keeps it on the near side and makes
+            #     Eq. (44) a secant iteration on lambda_c(lambda_b) -
+            #     lambda_b, which divides the distance by a fixed factor per
+            #     step whatever s is. The ny=60 Arbocz and Starnes mesh
+            #     reaches s = -1.09, where the fixed eta = 0.5 of Eq. (44)
+            #     sits just above the 0.478 that would have been safe.
+            #
+            #     The fraction is 0.7 rather than something closer to one
+            #     because s is estimated backwards and lags while it
+            #     steepens: on that same mesh the step that overshoots is
+            #     taken with s = -0.66 measured over the previous interval,
+            #     against the -1.09 the step itself turns out to have, so a
+            #     margin of about a quarter is needed on 1 - s
+            if lambda_c_prev is not None and lambda_b != lambda_prev:
+                s = (lambda_c - lambda_c_prev)/(lambda_b - lambda_prev)
+                if s < 0:
+                    eta = min(eta, 0.7/(1 - s))
+            eta = min(eta, eta_cap)
             #NOTE the load stepping is load controlled, so the last steps take
             #     the state very close to a singular tangent stiffness matrix.
             #     A tangent predictor keeps the Newton-Raphson in its
@@ -419,8 +470,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             if u0_new is None:
                 #NOTE no further progress possible with load control
                 break
+            back = (lambda_b, u0, KT, lambda_prev, u0dot_prev, lambda_c_prev)
             lambda_prev = lambda_b
             u0dot_prev = u0_lin if KT is None else calc_u0dot(KT)
+            lambda_c_prev = lambda_c
             u0, KT = u0_new, KT_new
             lambda_b = lambda_b_new
             KC = KC0 + assemble_KCNL(u0)
