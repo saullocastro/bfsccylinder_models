@@ -102,11 +102,20 @@ def test_Arbocz_Starnes_2002():
     #of the NASA layered composite shell AW-CYL-1-1, laminate [+-45/0/90]s.
     L = 0.3556 # m, 14.0 in = 355.600 mm
     R = 0.20318603 # m, 7.99945 in = 203.18603 mm
-    #NOTE ny=40 keeps this test at about 4 min. The ny=60 figures, lambda_c
-    #     = 0.3359 with n=10 circumferential waves and |b_1111| = 0.437, were
-    #     measured before the pre-buckling solve was restricted to the
-    #     axisymmetric subspace, when that mesh took more than an hour because
-    #     the Newton-Raphson kept backing off, and have not been repeated
+    #NOTE ny=40 keeps this test at about 4 min. The ny=60 figures quoted in
+    #     earlier versions of this comment, lambda_c = 0.3359 with n=10
+    #     circumferential waves and |b_1111| = 0.437, are NOT re-measurable
+    #     as they stand: on that mesh the Newton-Raphson contracts by about
+    #     0.95 per iteration, exhausts NR_maxiter at every load step from
+    #     lambda_b/lambda_c = 0.92 on, and the load stepping saturates around
+    #     0.94 instead of reaching the 0.995 the expansion needs. That is not
+    #     a conditioning problem and not a limit point, the reduced
+    #     axisymmetric tangent keeping a smallest eigenvalue of 6.3e-3 with no
+    #     negative one throughout; it is the tangent itself, which a
+    #     directional Taylor test against fint shows to be inconsistent at
+    #     the 1.4e-3 level, see the note in cyclic_symmetry.axisymmetric_basis.
+    #     The same inconsistency is harmless at ny=40, where the contraction
+    #     is about 0.3 per iteration, which is why this mesh converges
     ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))

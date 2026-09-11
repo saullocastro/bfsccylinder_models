@@ -14,6 +14,52 @@ rotation inside the degenerate buckling mode pairs.
 
 """
 import numpy as np
+from scipy.sparse import csc_matrix
+
+
+def axisymmetric_basis(axi_order, bu, DOF):
+    """Basis of the axisymmetric subspace, and its unknown coordinates
+
+    One column per axial station and per degree of freedom, carrying one at
+    that degree of freedom of every node of the station, so that an
+    axisymmetric field is ``B a`` and the columns are orthogonal with squared
+    norm ny.
+
+    Solving the pre-buckling problem as the Galerkin projection onto this
+    basis, ``B.T K B a = B.T f``, states directly what solving the full
+    system and projecting the correction afterwards only arrives at
+    indirectly, and it is far smaller: nx*DOF unknowns against the full
+    count, 250 against 15000 on the ny=60 mesh of the Arbocz and Starnes
+    case. It also makes the deflation of the buckling modes from the
+    correction unnecessary, the whole near critical cluster being outside the
+    subspace by construction.
+
+    The two give the same iterates here, to eleven digits on the meshes of
+    the test suite, so this is a simplification and a saving rather than a
+    correction. In particular it does NOT cure the slow convergence of the
+    Newton-Raphson on finer meshes, which comes from the tangent itself: a
+    directional Taylor test of KC0 + KCNL(u) + KG(u) against fint plateaus at
+    a relative error of 1.4e-3 instead of falling with the step, and no
+    recombination of those three matrices removes it, the best fit over their
+    coefficients only reaching 1.0e-3. The iteration is therefore an inexact
+    Newton one at every mesh, contracting by about 0.3 per iteration at ny=40
+    and by 0.95 at ny=60, where it exhausts NR_maxiter at every load step.
+
+    Returns the basis and the boolean mask of its unknown coordinates. A
+    reduced coordinate is known as soon as one of the nodes it spans is
+    constrained, the single node constraint then fixing the whole station,
+    which is what an axisymmetric field requires of it anyway.
+    """
+    nx, ny = axi_order.shape
+    rows = np.empty((nx, ny, DOF), dtype=np.int64)
+    cols = np.empty((nx, ny, DOF), dtype=np.int64)
+    for d in range(DOF):
+        rows[:, :, d] = DOF*axi_order + d
+        cols[:, :, d] = DOF*np.arange(nx)[:, None] + d
+    B = csc_matrix((np.ones(nx*ny*DOF), (rows.reshape(-1), cols.reshape(-1))),
+                   shape=(bu.shape[0], nx*DOF))
+    bkr = (~bu).reshape(-1, DOF)[axi_order].any(axis=1).reshape(-1)
+    return B, ~bkr
 
 
 def mesh_order(x, y, nx, ny):
