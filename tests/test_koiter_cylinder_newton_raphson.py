@@ -95,8 +95,8 @@ def test_Arbocz_Starnes_2002():
     L = 0.3556 # m, 14.0 in = 355.600 mm
     R = 0.20318603 # m, 7.99945 in = 203.18603 mm
     #NOTE ny=40 keeps this test at about 4 min. The ny=60 mesh converges in
-    #     four load steps with no step back off and gives lambda_c = 0.329738
-    #     with n=11 circumferential waves and b_1111 = -0.350554, which are
+    #     four load steps with no step back off and gives lambda_c = 0.330603
+    #     with n=11 circumferential waves and b_1111 = -0.356457, which are
     #     the figures worth comparing with the literature below. That mesh
     #     was unusable until bfsccylinder 0.6.0: with the tangent stiffness
     #     matrix inconsistent with the internal force vector the
@@ -143,19 +143,19 @@ def test_Arbocz_Starnes_2002():
     #
     #     The Level-2 ANILISA n-search gives 0.329163 at n=10 and its absolute
     #     minimum 0.328594 at n=11, and Level-3 STAGS-A gives 0.327759 (n=11,
-    #     161x201 mesh). This mesh buckles with n=10 and gives the 0.331273
-    #     below, 0.6% above the ANILISA n=10 entry, and ny=60 buckles with
-    #     n=11 and gives 0.329738, 0.3% above the ANILISA n=11 one. Both are
+    #     161x201 mesh). This mesh buckles with n=10 and gives the 0.331413
+    #     below, 0.7% above the ANILISA n=10 entry, and ny=60 buckles with
+    #     n=11 and gives 0.330603, 0.6% above the ANILISA n=11 one. Both are
     #     still REGRESSION values for their mesh
-    assert np.isclose(lambda_c, 0.331273, rtol=0.01)
+    assert np.isclose(lambda_c, 0.331413, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
     #NOTE regression value for this mesh, NOT a converged one, but of the
     #     right sign and the right order now. Level-2 ANILISA reports
     #     b = -0.37605 for the n=11 mode with rigorous nonlinear pre-buckling
     #     (alpha = 0.46663, beta = -0.22174) and Sun et al. Table 2 gives
-    #     -0.3772. This mesh buckles with n=10 and gives the -0.335448 below;
-    #     ny=60 buckles with n=11 and gives -0.350554, 7% from the ANILISA
+    #     -0.3772. This mesh buckles with n=10 and gives the -0.335975 below;
+    #     ny=60 buckles with n=11 and gives -0.356457, 5% from the ANILISA
     #     value for that mode.
     #
     #     A negative b is an imperfection sensitive shell, which is what this
@@ -181,7 +181,7 @@ def test_Arbocz_Starnes_2002():
     #     sees uab through phi3_ab @ uab, whose contraction with the buckling
     #     modes is the numerator of a_ijk, and a_ijk vanishes for this
     #     symmetric bifurcation. Not re-measured since
-    assert np.isclose(b_1111, -0.335448, rtol=0.05)
+    assert np.isclose(b_1111, -0.335975, rtol=0.05)
 
 if __name__ == '__main__':
     test_Arbocz_Starnes_2002()
