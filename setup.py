@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 
 
 is_released = True
-version = '0.3.0'
+version = '0.3.1'
 
 
 def git_version():
