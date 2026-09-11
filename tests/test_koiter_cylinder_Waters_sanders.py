@@ -36,7 +36,12 @@ def test_Waters_shell():
 
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    assert np.isclose(b_1111, -0.04796416375605581, rtol=0.02)
+    #NOTE reference value updated after fixing eps''_ab in the Koiter tensors,
+    #     which was falling back to von Karman kinematics (see
+    #     koiter_cylinder_newton_raphson_sanders.py). DIANA CQ40L reports
+    #     b_1111 = -0.044816 for this shell (Table 6 of the SciTech 2022
+    #     paper), so the present value is within 0.4% of that reference.
+    assert np.isclose(b_1111, -0.04498374754739185, rtol=0.02)
 
 
 if __name__ == '__main__':

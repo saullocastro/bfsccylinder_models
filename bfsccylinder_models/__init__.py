@@ -4,7 +4,10 @@ BFSCCYLINDER MODELS - Models using the BFSC cylinder finite element
 
 Author: Saullo G. P. Castro
 
-.. automodule:: bfsccylinder_models.models
+.. automodule:: bfsccylinder_models.cyclic_symmetry
+    :members:
+
+.. automodule:: bfsccylinder_models.linbuck_VAFW
     :members:
 
 .. automodule:: bfsccylinder_models.vatfunctions
