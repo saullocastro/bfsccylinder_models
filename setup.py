@@ -61,7 +61,7 @@ def read(fname):
 #_____________________________________________________________________________
 
 install_requires = [
-        "bfsccylinder",
+        "bfsccylinder>=0.6.0",
         "numpy",
         "scipy",
         "composites",
