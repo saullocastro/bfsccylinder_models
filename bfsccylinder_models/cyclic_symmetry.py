@@ -36,14 +36,17 @@ def axisymmetric_basis(axi_order, bu, DOF):
 
     The two give the same iterates here, to eleven digits on the meshes of
     the test suite, so this is a simplification and a saving rather than a
-    correction. In particular it does NOT cure the slow convergence of the
-    Newton-Raphson on finer meshes, which comes from the tangent itself: a
-    directional Taylor test of KC0 + KCNL(u) + KG(u) against fint plateaus at
-    a relative error of 1.4e-3 instead of falling with the step, and no
-    recombination of those three matrices removes it, the best fit over their
-    coefficients only reaching 1.0e-3. The iteration is therefore an inexact
-    Newton one at every mesh, contracting by about 0.3 per iteration at ny=40
-    and by 0.95 at ny=60, where it exhausts NR_maxiter at every load step.
+    correction.
+
+    It is in particular not what made the Newton-Raphson converge. Until
+    bfsccylinder 0.6.0 the tangent stiffness matrix was not the derivative of
+    the internal force vector, a directional Taylor test of
+    KC0 + KCNL(u) + KG(u) against fint plateauing at a relative error of
+    1.4e-3 instead of falling with the step, which left the iteration an
+    inexact Newton one contracting by about 0.3 per iteration at ny=40 and by
+    0.95 at ny=60, where it exhausted NR_maxiter at every load step. With the
+    consistent tangent of 0.6.0 the same load steps take a single iteration
+    each and ny=60 converges in four of them.
 
     Returns the basis and the boolean mask of its unknown coordinates. A
     reduced coordinate is known as soon as one of the nodes it spans is
@@ -116,9 +119,12 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     second order field of a mode with n circumferential waves carries the
     harmonic 2n, which a mesh sized for the buckling mode itself barely
     resolves. Measured on the Sun et al. case of the test suite, ny = 40,
-    rotating the critical pair by 30 degrees moves b_1111 from -0.0008 to
-    0.2744, with everything else, the pre-buckling state and the buckling load
-    included, unchanged to eleven digits.
+    rotating the critical pair by 30 degrees moves b_1111 from -0.230556 to
+    -0.192752, 16%, with everything else, the pre-buckling state and the
+    buckling load included, unchanged to eleven digits. Before the consistent
+    tangent of bfsccylinder 0.6.0 the same rotation moved it from -0.0008 to
+    0.2744, sign included, so most of that dependence was the tangent rather
+    than the mesh; what is left is the mesh.
 
     Each pair is therefore rotated to the member whose crest falls on the
     y = 0 generator, a property of the mesh and not of the arithmetic. That
