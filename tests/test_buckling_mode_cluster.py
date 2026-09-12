@@ -29,8 +29,7 @@ import numpy as np
 import pytest
 from composites import laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import (
-        fkoiter_cyl_SS3)
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3
 
 L = 0.3556      # m
 R = 0.2032      # m

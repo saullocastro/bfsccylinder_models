@@ -7,7 +7,7 @@ import pytest
 from composites import laminated_plate
 
 from bfsccylinder_models.koiter_cylinder_CTS_sanders import fkoiter_cylinder_CTS_circum
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3
 
 #NOTE NLprebuck=True exercises the nonlinear pre-buckling algorithm: the
 #     axisymmetric Newton-Raphson pre-buckling solve and the iterative
