@@ -5,8 +5,8 @@ sys.path.append(r'../../bfsccylinder')
 import numpy as np
 from composites import isotropic_plate, laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson import fkoiter_cyl_SS3
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3 as fkoiter_cyl_SS3_sanders
+from bfsccylinder_models.koiter_cylinder import fkoiter_cyl_SS3
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3 as fkoiter_cyl_SS3_sanders
 
 def test_Sun_et_al():
     #Sun, Y., Tian, K., Li, R., and Wang, B., 2020, “Accelerated Koiter Method

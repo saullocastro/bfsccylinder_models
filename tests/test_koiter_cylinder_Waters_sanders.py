@@ -5,7 +5,7 @@ sys.path.append(r'../../bfsccylinder')
 import numpy as np
 from composites import laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3
 
 def test_Waters_shell():
     #Arbocz, J., and Starnes, J. H., 2002, “On a High-Fidelity Hierarchical Approach to Buckling Load Calculations,” New Approaches to Structural Mechanics, Shells and Biological Structures, pp. 271–292.

@@ -27,7 +27,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
-        NLprebuck_eps1=0.005, NLprebuck_maxiter=12, NR_maxiter=40,
+        NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
         NR_eps=1.e-4, NR_eps_accept=1.e-3,
         max_ny_nx_aspect_ratio=2, zero_offset=False,
         c1_threshold_factor=0.01, c2_threshold_factor=0.01):

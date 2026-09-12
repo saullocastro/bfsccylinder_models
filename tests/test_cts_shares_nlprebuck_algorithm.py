@@ -37,8 +37,8 @@ REGIONS = [
 ]
 
 PAIRS = [
-    ('koiter_cylinder_CTS.py', 'koiter_cylinder_newton_raphson.py'),
-    ('koiter_cylinder_CTS_sanders.py', 'koiter_cylinder_newton_raphson_sanders.py'),
+    ('koiter_cylinder_CTS.py', 'koiter_cylinder.py'),
+    ('koiter_cylinder_CTS_sanders.py', 'koiter_cylinder_sanders.py'),
 ]
 
 
