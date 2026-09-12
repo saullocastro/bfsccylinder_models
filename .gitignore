@@ -24,3 +24,10 @@ temp*.*
 
 models_core.c 
 models_core.html 
+doc/nlprebuck_implementation.aux
+doc/nlprebuck_implementation.fdb_latexmk
+doc/nlprebuck_implementation.fls
+doc/nlprebuck_implementation.log
+doc/nlprebuck_implementation.out
+doc/nlprebuck_implementation.synctex.gz
+doc/nlprebuck_implementation.toc

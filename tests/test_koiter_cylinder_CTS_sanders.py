@@ -3,12 +3,21 @@ sys.path.append(r'..')
 sys.path.append(r'../../bfsccylinder')
 
 import numpy as np
+import pytest
 from composites import laminated_plate
 
 from bfsccylinder_models.koiter_cylinder_CTS_sanders import fkoiter_cylinder_CTS_circum
 from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3
 
-def test_pm45():
+#NOTE NLprebuck=True exercises the nonlinear pre-buckling algorithm: the
+#     axisymmetric Newton-Raphson pre-buckling solve and the iterative
+#     eigenvalue algorithm of Sun et al. that walks the expansion point up to
+#     the bifurcation point. In the constant stiffness limit below the CTS
+#     model discretizes exactly the same shell on exactly the same mesh as
+#     fkoiter_cyl_SS3, so the two must return the same answer whichever
+#     pre-buckling state the expansion is made about
+@pytest.mark.parametrize('NLprebuck', [False, True])
+def test_pm45(NLprebuck):
     L = 0.3 # m
     R = 0.136/2 # m
 
@@ -30,7 +39,6 @@ def test_pm45():
     thetadeg_c2 = 45
 
     Nxxunit = 1.
-    NLprebuck = False
     out1 = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
             num_eigvals=5, koiter_num_modes=1, Nxxunit=Nxxunit, idealistic_CTS=True,
@@ -52,13 +60,25 @@ def test_pm45():
     print('fkoiter_cyl_SS3 eigvals', out2['eigvals'])
     print('fkoiter_cyl_SS3 koiter', out2['koiter'])
 
+    assert np.isclose(out1['volume'], out2['volume'])
+    assert np.isclose(out1['mass'], out2['mass'])
+
     #NOTE only the first (critical) buckling eigenvalue is compared. The higher
     #     modes form near-degenerate clusters and ARPACK (eigsh) returns them in
     #     a run-dependent order/multiplicity, so an element-wise comparison of
     #     the whole spectrum is not reproducible.
-    assert np.isclose(out1['eigvals'][0], out2['eigvals'][0])
-    assert np.isclose(out1['volume'], out2['volume'])
-    assert np.isclose(out1['mass'], out2['mass'])
+    #
+    #     With NLprebuck=True the eigenvalues belong to the pre-buckling state
+    #     the load stepping stopped at, which is only pinned to within
+    #     NLprebuck_eps1, so the buckling LOAD is what the two models must
+    #     agree on, not the raw eigenvalue of the shifted problem
+    if NLprebuck:
+        assert np.isclose(out1['Pcr'], out2['Pcr'], rtol=0.01)
+        assert abs(out1['mu'][0] - 1) <= 0.005
+        assert abs(out2['mu'][0] - 1) <= 0.005
+    else:
+        assert np.isclose(out1['eigvals'][0], out2['eigvals'][0])
+        assert np.isclose(out1['Pcr'], out2['Pcr'])
 
     #TODO I am unsure about the a factors
     #for k in out1['koiter']['a_ijk'].keys():
@@ -70,5 +90,6 @@ def test_pm45():
                       rtol=0.05)
 
 if __name__ == '__main__':
-    test_pm45()
+    test_pm45(False)
+    test_pm45(True)
 
