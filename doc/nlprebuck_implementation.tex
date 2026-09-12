@@ -7,6 +7,7 @@
 \usepackage{geometry}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage{hyperref}
 \usepackage{xcolor}
 
@@ -28,18 +29,19 @@ This note documents the implementation of the single-mode Koiter method with a
 non-linear pre-buckling state in
 \texttt{koiter\_cylinder\_newton\_raphson.py} (Donnell-Mushtari-Vlasov
 kinematics) and \texttt{koiter\_cylinder\_newton\_raphson\_sanders.py}
-(Sanders-Koiter kinematics).  It covers the tangent stiffness matrix and the
+(Sanders-Koiter kinematics), and of the same algorithm in the
+variable-stiffness models \texttt{koiter\_cylinder\_CTS.py} and
+\texttt{koiter\_cylinder\_CTS\_sanders.py} (Section~\ref{sec:cts}).
+It covers the tangent stiffness matrix and the
 consistency it must satisfy, the reduction of the pre-buckling problem to the
 axisymmetric subspace, the incremental-iterative scheme that places the
 expansion point in the neighbourhood of the bifurcation point, the removal of
 the arbitrariness left by the degenerate buckling modes, and the
-stiffness-weighted orthogonality condition imposed on the second-order fields.
-The notation follows the finite element chapter of \emph{Stability and
-Vibrations of Thin-Walled Composite Structures}, 2nd edition.  Equation
-numbers of the form ``Sun~Eq.~(nn)'' refer to Sun, Tian, Li and Wang,
-\emph{Accelerated Koiter method for post-buckling analysis of thin-walled
-shells under axial compression}, Thin-Walled Structures \textbf{155} (2020)
-106962.
+stiffness-weighted orthogonality condition imposed on the second-order
+fields, and the mesh resolution the continuous-tow-shearing cylinders
+require.
+The notation follows the finite element chapter of \citet{castro2023}.  Equation
+numbers of the form ``Sun~Eq.~(nn)'' refer to \citet{sun2020}.
 \end{abstract}
 
 \tableofcontents
@@ -64,8 +66,15 @@ geometrically non-linear analysis, and the whole expansion must then be
 carried out about a state \emph{in the neighbourhood of the bifurcation
 point}.  This document describes the latter case.
 
-The shell coordinates are the axial $x$ and the circumferential $\theta$, the
-radius is $r$ and the thickness $h$.  The degrees-of-freedom are collected in
+The shell coordinates are the axial $x$ and the circumferential $y$, the
+radius is $r$ and the thickness $h$.  Following \citet{dossantos2022}, $y$
+is the circumferential coordinate measured as an \emph{arc length},
+$y = r\vartheta$ with $\vartheta$ the polar angle, so that $x$ and $y$
+have the same units and the membrane strains below carry no explicit
+factor of $r$.  The symbol $\theta$ is reserved throughout for the tow
+steering angle of Section~\ref{sec:cts}.  The circumferential
+discretisation is $n_y$ elements around the circumference, the axial one
+$n_x$ stations along the generator.  The degrees-of-freedom are collected in
 $\boldsymbol{\bar{u}}$, the fundamental (pre-buckling) state is
 $\boldsymbol{\hat{u}}$, and the buckling modes are $\delta\boldsymbol{\bar{u}}_i$.
 The external load is proportional, $\boldsymbol{F}_{ext} = \lambda
@@ -83,29 +92,29 @@ The membrane strains are written, for both kinematic models, as
 	\boldsymbol{\varepsilon}
 	= \boldsymbol{B}_m\boldsymbol{\bar{u}}
 	+ \frac{1}{2}
-	\begin{Bmatrix} g_x^2 \\ g_\theta^2 \\ 2\,g_x g_\theta \end{Bmatrix},
+	\begin{Bmatrix} g_x^2 \\ g_y^2 \\ 2\,g_x g_y \end{Bmatrix},
 	\qquad
 	\boldsymbol{\kappa} = \boldsymbol{B}_b\boldsymbol{\bar{u}}
 \end{equation}
 
-\noindent where $g_x$ and $g_\theta$ are the two gradient measures that carry
+\noindent where $g_x$ and $g_y$ are the two gradient measures that carry
 the geometric non-linearity:
 \begin{equation}\label{eq:gradients}
 	\text{Donnell-Mushtari-Vlasov:}\quad
-	g_x = w_{,x},\quad g_\theta = w_{,\theta},
+	g_x = w_{,x},\quad g_y = w_{,y},
 	\qquad
 	\text{Sanders-Koiter:}\quad
-	g_x = w_{,x},\quad g_\theta = w_{,\theta} - \frac{v}{r}
+	g_x = w_{,x},\quad g_y = w_{,y} - \frac{v}{r}
 \end{equation}
 
 Every non-linear term of the Sanders-Koiter membrane strains is recovered from
 the Donnell-Mushtari-Vlasov one by the substitution
-$(w_{,x},w_{,\theta})\rightarrow(g_x,g_\theta)$, which is why the two modules
+$(w_{,x},w_{,y})\rightarrow(g_x,g_y)$, which is why the two modules
 differ only in the definition of Eq.~\ref{eq:gradients} and in the
 corresponding interpolation matrices $\boldsymbol{G}_x$ and
-$\boldsymbol{G}_\theta$, with $g_x = \boldsymbol{G}_x\boldsymbol{\bar{u}}$ and
-$g_\theta = \boldsymbol{G}_\theta\boldsymbol{\bar{u}}$.  The additional term
-$-v/r$ of the Sanders-Koiter operator $\boldsymbol{G}_\theta$ is the same one
+$\boldsymbol{G}_y$, with $g_x = \boldsymbol{G}_x\boldsymbol{\bar{u}}$ and
+$g_y = \boldsymbol{G}_y\boldsymbol{\bar{u}}$.  The additional term
+$-v/r$ of the Sanders-Koiter operator $\boldsymbol{G}_y$ is the same one
 highlighted in the geometric stiffness matrix of the linear buckling chapter.
 The constitutive relation is the usual laminated-shell one, collectively
 denoted $\boldsymbol{C}$, relating $\{\boldsymbol{N},\boldsymbol{M}\}$ to
@@ -122,13 +131,13 @@ path, and abbreviating $\hat{g}_\alpha =
 \boldsymbol{G}_\alpha\boldsymbol{\hat{u}}$, $g_{\alpha,\lambda} =
 \boldsymbol{G}_\alpha\boldsymbol{\hat{u}}_{,\lambda}$, $g_{\alpha,\lambda\lambda} =
 \boldsymbol{G}_\alpha\boldsymbol{\hat{u}}_{,\lambda\lambda}$, with
-$\alpha \in \{x,\theta\}$:
+$\alpha \in \{x,y\}$:
 \begin{align}
 	\boldsymbol{\varepsilon}_{,\lambda}
 	&= \boldsymbol{B}_m\boldsymbol{\hat{u}}_{,\lambda}
 	 + \begin{Bmatrix}
-	     \hat{g}_x g_{x,\lambda} \\ \hat{g}_\theta g_{\theta,\lambda} \\
-	     \hat{g}_x g_{\theta,\lambda} + \hat{g}_\theta g_{x,\lambda}
+	     \hat{g}_x g_{x,\lambda} \\ \hat{g}_y g_{y,\lambda} \\
+	     \hat{g}_x g_{y,\lambda} + \hat{g}_y g_{x,\lambda}
 	   \end{Bmatrix},
 	& \boldsymbol{\kappa}_{,\lambda} &= \boldsymbol{B}_b\boldsymbol{\hat{u}}_{,\lambda}
 	\label{eq:epsdot}\\[4pt]
@@ -136,9 +145,9 @@ $\alpha \in \{x,\theta\}$:
 	&= \boldsymbol{B}_m\boldsymbol{\hat{u}}_{,\lambda\lambda}
 	 + \begin{Bmatrix}
 	     g_{x,\lambda}^2 + \hat{g}_x g_{x,\lambda\lambda} \\
-	     g_{\theta,\lambda}^2 + \hat{g}_\theta g_{\theta,\lambda\lambda} \\
-	     2 g_{x,\lambda} g_{\theta,\lambda} + \hat{g}_x g_{\theta,\lambda\lambda}
-	       + \hat{g}_\theta g_{x,\lambda\lambda}
+	     g_{y,\lambda}^2 + \hat{g}_y g_{y,\lambda\lambda} \\
+	     2 g_{x,\lambda} g_{y,\lambda} + \hat{g}_x g_{y,\lambda\lambda}
+	       + \hat{g}_y g_{x,\lambda\lambda}
 	   \end{Bmatrix},
 	& \boldsymbol{\kappa}_{,\lambda\lambda} &= \boldsymbol{B}_b\boldsymbol{\hat{u}}_{,\lambda\lambda}
 	\label{eq:epsddot}
@@ -148,16 +157,16 @@ $\alpha \in \{x,\theta\}$:
 \begin{equation}\label{eq:epsderivs}
 	\frac{\partial\boldsymbol{\varepsilon}}{\partial\boldsymbol{\bar{u}}}
 	= \boldsymbol{B}_m + \begin{Bmatrix}
-	    \hat{g}_x\boldsymbol{G}_x \\ \hat{g}_\theta\boldsymbol{G}_\theta \\
-	    \hat{g}_x\boldsymbol{G}_\theta
-	      + \hat{g}_\theta\boldsymbol{G}_x \end{Bmatrix},
+	    \hat{g}_x\boldsymbol{G}_x \\ \hat{g}_y\boldsymbol{G}_y \\
+	    \hat{g}_x\boldsymbol{G}_y
+	      + \hat{g}_y\boldsymbol{G}_x \end{Bmatrix},
 	\qquad
 	\frac{\partial^2\boldsymbol{\varepsilon}}
 	     {\partial\lambda\,\partial\boldsymbol{\bar{u}}}
 	= \begin{Bmatrix}
-	    g_{x,\lambda}\boldsymbol{G}_x \\ g_{\theta,\lambda}\boldsymbol{G}_\theta \\
-	    g_{x,\lambda}\boldsymbol{G}_\theta
-	      + g_{\theta,\lambda}\boldsymbol{G}_x \end{Bmatrix}
+	    g_{x,\lambda}\boldsymbol{G}_x \\ g_{y,\lambda}\boldsymbol{G}_y \\
+	    g_{x,\lambda}\boldsymbol{G}_y
+	      + g_{y,\lambda}\boldsymbol{G}_x \end{Bmatrix}
 \end{equation}
 
 If one assumes the pre-buckling path to be linear in the load parameter,
@@ -285,7 +294,7 @@ inconsistent tangent therefore degrades the iteration from quadratic to
 linear, with a contraction factor that grows as the tangent is approached, but
 it does not by itself move the equilibrium state.  On the coarse meshes of
 Section~\ref{sec:results} the contraction was about $0.3$ per iteration, which
-still converges; on a mesh with $n_\theta = 60$ it reached $0.95$, exhausting
+still converges; on a mesh with $n_y = 60$ it reached $0.95$, exhausting
 the iteration budget at every load step and leaving the load stepping stalled
 near $\lambda_b/\lambda_c = 0.94$.
 
@@ -317,9 +326,9 @@ axisymmetric pre-buckling problem.
 
 \subsection{Cyclic symmetry of the mesh}
 
-The mesh has $n_\theta$ elements around the circumference, and the element
+The mesh has $n_y$ elements around the circumference, and the element
 degrees-of-freedom are expressed in the local shell frame, which turns with
-$\theta$.  Shifting the circumferential node index cyclically by one element
+$y$.  Shifting the circumferential node index cyclically by one element
 is therefore a symmetry of every operator assembled on the mesh: if
 $\boldsymbol{P}$ denotes that shift, then $\boldsymbol{P}^\top
 \boldsymbol{K}\boldsymbol{P} = \boldsymbol{K}$ for
@@ -336,11 +345,37 @@ another buckling mode carrying the same multiplier.
 \subsection{The reduced problem}
 
 Let $\boldsymbol{B}_{axi}$ collect one column per axial station and per
-degree-of-freedom, carrying one at that degree-of-freedom of every node of the
-station, so that an axisymmetric field is $\boldsymbol{B}_{axi}\boldsymbol{a}$
-and the columns are orthogonal with squared norm $n_\theta$.  The Newton
-correction is obtained from the Galerkin projection of the tangent problem
-onto that basis:
+degree-of-freedom, carrying one at that degree-of-freedom of every node of
+the station,
+\begin{equation}\label{eq:baxi}
+	\left[\boldsymbol{B}_{axi}\right]_{\,(i\,n_y + j)\,n_{DOF} + d,\;\;
+	                                    i\,n_{DOF} + e} = \delta_{de},
+	\qquad
+	\begin{array}{l}
+	i = 0\ldots n_x-1 \\ j = 0\ldots n_y-1 \\ d,e = 0\ldots n_{DOF}-1
+	\end{array}
+\end{equation}
+so that an axisymmetric field is $\boldsymbol{B}_{axi}\boldsymbol{a}$, the
+columns are mutually orthogonal, and $\boldsymbol{B}_{axi}^\top
+\boldsymbol{B}_{axi} = n_y\boldsymbol{I}$.
+
+The correction is then obtained by a Bubnov-Galerkin projection
+\citep{fletcher1984}: it is sought \emph{in} the subspace spanned by the
+columns of $\boldsymbol{B}_{axi}$, and the residual of the tangent problem is
+required to be orthogonal \emph{to that same subspace},
+\begin{equation}\label{eq:galerkin}
+	\delta\boldsymbol{\bar{u}} = \boldsymbol{B}_{axi}\boldsymbol{a}
+	\quad\text{(trial)},
+	\qquad
+	\boldsymbol{B}_{axi}^\top\left(\boldsymbol{K}_T\,
+	\boldsymbol{B}_{axi}\boldsymbol{a} + \boldsymbol{R}\right)
+	= \boldsymbol{0}
+	\quad\text{(test)}
+\end{equation}
+Trial and test spaces coincide, which is what makes the projection
+Bubnov-Galerkin rather than Petrov-Galerkin, and which preserves the symmetry
+of $\boldsymbol{K}_T$ in the reduced operator.  Written out, Eq.
+\ref{eq:galerkin} is
 \begin{equation}\label{eq:reduced-newton}
 	\left( \boldsymbol{B}_{axi}^\top \boldsymbol{K}_T \boldsymbol{B}_{axi}
 	\right) \boldsymbol{a}
@@ -349,14 +384,39 @@ onto that basis:
 	\delta\boldsymbol{\bar{u}} = \boldsymbol{B}_{axi}\boldsymbol{a}
 \end{equation}
 
-The reduced system has $n_x \times n_{DOF}$ unknowns against the full count,
-$250$ against $15000$ on the $n_\theta = 60$ mesh, and it removes the need to
-deflate the buckling modes from the correction, the whole near-critical
-cluster lying outside the subspace by construction.  Because the residual of
-an axisymmetric state is itself axisymmetric, $\boldsymbol{B}_{axi}^\top
-\boldsymbol{R} = \boldsymbol{0}$ implies $\boldsymbol{R} = \boldsymbol{0}$ on
-the free degrees-of-freedom, so the reduced solution is an exact solution of
-the full equilibrium equations and not an approximation of one.
+This is the reduced-basis technique for non-linear structural analysis of
+\citet{noor1980}, used here with a basis known \emph{a priori} from the
+symmetry of the problem instead of one accumulated from previous solutions.
+The cyclic shift $\boldsymbol{P}$ commutes with $\boldsymbol{K}_T$, and the
+column space of $\boldsymbol{B}_{axi}$ is exactly the subspace invariant
+under it; building the basis from the symmetry group in this way is the
+standard treatment of rotationally periodic structures \citep{thomas1979}.
+What is specific to the present use is that only the zeroth circumferential
+harmonic is retained, the remaining $n_y - 1$ harmonics being precisely where
+the buckling modes live.
+
+Three consequences follow.
+
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Size.}  The reduced system has $n_x \times n_{DOF}$ unknowns
+        against the full count, $250$ against $15000$ on the $n_y = 60$
+        mesh, and is small enough to be solved as a dense system.
+  \item \textbf{No deflation.}  The whole near-critical cluster lies outside
+        the subspace by construction, so the buckling modes never have to be
+        deflated out of the correction.
+  \item \textbf{The reduced solution is exact.}  Because $\boldsymbol{K}_T$
+        and $\boldsymbol{R}$ commute with $\boldsymbol{P}$, the residual
+        evaluated at an axisymmetric state is itself axisymmetric and
+        therefore has no component outside the subspace.  Hence
+        $\boldsymbol{B}_{axi}^\top\boldsymbol{R} = \boldsymbol{0}$ implies
+        $\boldsymbol{R} = \boldsymbol{0}$ on the free degrees-of-freedom, and
+        the Galerkin condition of Eq.~\ref{eq:galerkin} is \emph{equivalent}
+        to the full equilibrium equations rather than a projection of them.
+        The converged state solves the full problem exactly.  This is what
+        separates a symmetry-adapted basis from a general reduced basis, for
+        which Eq.~\ref{eq:galerkin} leaves a residual outside the subspace
+        that is never driven to zero.
+\end{enumerate}
 
 A reduced coordinate is treated as known as soon as one of the nodes it spans
 is constrained.  This matters for the single-node constraint that suppresses
@@ -367,14 +427,46 @@ anyway.  The same asymmetry is handled in Section~\ref{sec:canonical} by
 subtracting an axial rigid body translation, which carries no strain and is
 annihilated by both stiffness matrices.
 
-The reduced matrix mixes nodal displacements with nodal derivatives, whose
-entries differ by orders of magnitude, and reaches a condition number of
-$4\times10^{12}$.  The sparse solver used elsewhere equilibrates internally,
-the dense one does not, so the reduced matrix is scaled symmetrically before
-the solve, which brings the condition number to $3\times10^{2}$.  Measured on
-the $n_\theta = 60$ case this leaves every iterate unchanged to ten digits,
-the graded matrix being solved accurately by the pivoting alone; it is kept as
-a guard rather than as a correction.
+\subsection{Conditioning of the reduced matrix}
+\label{sec:scaling}
+
+The reduced coordinates place nodal displacements next to nodal derivatives,
+whose stiffness entries differ by many orders of magnitude, and the free part
+of $\boldsymbol{K}_r = \boldsymbol{B}_{axi}^\top \boldsymbol{K}_T
+\boldsymbol{B}_{axi}$ reaches a condition number of $4\times10^{12}$ on the
+$n_y = 60$ mesh.  The sparse solver used for the full systems equilibrates
+internally; the dense solver used on the reduced one does not, so the
+symmetric (Jacobi) equilibration is applied explicitly.
+
+Let $\boldsymbol{D} = \mathrm{diag}\left(|K_{r,kk}|^{-1/2}\right)$.  Then
+$\boldsymbol{K}_r\boldsymbol{a} = \boldsymbol{r}$ is solved in the form
+\begin{equation}\label{eq:scaling}
+	\left(\boldsymbol{D}\boldsymbol{K}_r\boldsymbol{D}\right)
+	\left(\boldsymbol{D}^{-1}\boldsymbol{a}\right)
+	= \boldsymbol{D}\boldsymbol{r},
+	\qquad\text{so}\qquad
+	\boldsymbol{a} = \boldsymbol{D}\left[
+	\left(\boldsymbol{D}\boldsymbol{K}_r\boldsymbol{D}\right)^{-1}
+	\boldsymbol{D}\boldsymbol{r}\right]
+\end{equation}
+which is what the code implements: it forms
+$\boldsymbol{D}\boldsymbol{K}_r\boldsymbol{D}$ and
+$\boldsymbol{D}\boldsymbol{r}$, solves the scaled system, and multiplies the
+result by $\boldsymbol{D}$ once more.  The scaled matrix has unit diagonal in
+absolute value.  For a symmetric positive definite matrix, equilibrating the
+diagonal in this way is within a factor of $n$ of the optimal symmetric
+scaling \citep{vandersluis1969}, $n$ being the order of the matrix; the
+reduced tangent is positive definite everywhere the load stepping actually
+solves it, which is on the near side of the bifurcation point.  The measured
+condition number falls from $4\times10^{12}$ to $3\times10^{2}$.
+
+Two points are worth making explicit.  Eq.~\ref{eq:scaling} is an exact
+rewriting of the same linear system, not a preconditioner and not an
+approximation: it changes the floating-point path taken, never the solution
+sought.  And on the meshes tried it changes nothing measurable --- on the
+$n_y = 60$ case every iterate is unchanged to ten digits, the graded matrix
+being solved accurately by partial pivoting alone.  It is kept as a guard
+against worse-conditioned meshes, not as a correction to these.
 
 %==============================================================================
 \section{Locating the expansion point}
@@ -435,10 +527,10 @@ and linearising, the new distance to the bifurcation point is
 \end{equation}
 
 The sensitivity $s$ steepens as the bifurcation point is approached and as the
-mesh is refined.  On the $n_\theta = 40$ meshes of Section~\ref{sec:results}
+mesh is refined.  On the $n_y = 40$ meshes of Section~\ref{sec:results}
 it reaches $-0.25$ and $-0.72$, for which Eq.~\ref{eq:eta-critical} permits
 $\eta = 0.80$ and $\eta = 0.58$, both above the fixed $0.5$, and no overshoot
-occurs.  On the $n_\theta = 60$ mesh it reaches $-1.09$, permitting only
+occurs.  On the $n_y = 60$ mesh it reaches $-1.09$, permitting only
 $\eta = 0.478$, and the fixed $\eta = 0.5$ overshoots to
 $\lambda_b/\lambda_c = 1.0013$.
 
@@ -460,7 +552,7 @@ Eq.~\ref{eq:step} into a secant iteration on $\lambda_c(\lambda_b) -
 step.
 
 The fraction is $0.7$ rather than something closer to unity because $s$ is
-estimated backwards and lags while it steepens.  On the $n_\theta = 60$ mesh
+estimated backwards and lags while it steepens.  On the $n_y = 60$ mesh
 the offending step is taken with $s = -0.66$ measured over the previous
 interval, which permits $\eta = 0.54$ and therefore does not bind on the fixed
 $\eta = 0.5$, while the step itself turns out to have $s = -1.09$.  A margin of
@@ -530,7 +622,7 @@ That would not matter if the post-buckling coefficients were invariant under
 that rotation, and they are not.  The second-order field of a mode with $n$
 circumferential waves carries the harmonic $2n$, which a mesh sized for the
 buckling mode itself barely resolves.  Measured on the case of
-Section~\ref{sec:results} with $n_\theta = 40$ and $n = 10$, rotating the
+Section~\ref{sec:results} with $n_y = 40$ and $n = 10$, rotating the
 critical pair by $30$ degrees moves $b_{1111}$ from $-0.230556$ to
 $-0.192752$, sixteen per cent, with the pre-buckling state and the buckling
 load unchanged to eleven digits.  Before the tangent of
@@ -540,7 +632,7 @@ tangent and what remains is the mesh.
 
 \subsection{Fixing the member}
 
-Each pair is rotated to the member whose crest falls on the $\theta = 0$
+Each pair is rotated to the member whose crest falls on the $y = 0$
 generator, which is a property of the mesh and not of the arithmetic.  Of the
 two members of a pair one has a crest on that generator and the other a node,
 so the dominant eigenvector of the $2\times2$ Gram matrix of their traces
@@ -564,6 +656,62 @@ This makes the coefficients reproducible: $9\times10^{-9}$ between a single
 threaded and a multi threaded run, against a sign difference between operating
 systems before.  It does not make them mesh converged, and only a mesh that
 resolves the harmonic $2n$ would.
+
+\subsection{How many modes the expansion actually needs}
+\label{sec:howmany}
+
+Fixing the member makes a single-mode result reproducible.  It does not make
+it complete, and the measured spectra say by how much it falls short.  Twelve
+multipliers were computed about the converged pre-buckling state of each
+reference shell, $n_y = 40$; every one of them came out as a degenerate pair,
+to eleven digits, so the cluster is counted in pairs below.
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{3}{c}{pairs within} & gap after \\
+\cmidrule(lr){2-4}
+ & $0.5\%$ & $1\%$ & $2\%$ & the $1\%$ cluster \\
+\midrule
+Sun~\S3.1, \texttt{NLprebuck=False}    & 1 & 3 & 5 & $0.28\%$ \\
+Sun~\S3.1, \texttt{NLprebuck=True}     & 3 & 4 & 4 & $2.29\%$ \\
+Arbocz, \texttt{NLprebuck=False}       & 1 & 4 & 6 & $0.26\%$ \\
+Arbocz, \texttt{NLprebuck=True}        & 2 & 3 & 4 & $0.99\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two readings of this table matter.
+
+The first is that the single-mode expansion retains \emph{one} eigenvector out
+of six or eight.  Its very first omission is the degenerate partner of the
+critical mode, which Section~\ref{sec:canonical} goes to some trouble to
+construct and then discards.  That alone bounds what the single-mode
+coefficient can be expected to reproduce, and it is consistent with the
+residual five per cent between $b_{1111}$ and the ANILISA value of
+Section~\ref{sec:results} surviving every mesh refinement tried.  Closing the
+$1\%$ cluster requires \texttt{koiter\_num\_modes} $= 6$ for the Arbocz shell
+and $8$ for the Sun shell; closing only the $0.5\%$ cluster requires $4$ and
+$6$.  In pairs, which is the natural unit here, that is three to four pairs.
+
+The second is that the non-linear pre-buckling state does not merely move the
+modes, it \emph{separates} them.  With \texttt{NLprebuck=False} the cluster
+has no boundary worth the name, the next pair sitting $0.26$ to $0.28$ per
+cent above the last one retained, so any truncation is arbitrary.  With
+\texttt{NLprebuck=True} a genuine spectral gap opens, $0.99$ and $2.29$ per
+cent, an order of magnitude wider than the spacing inside the cluster.  Only
+then is ``the cluster'' a well-defined set, and only then is a multi-mode
+truncation of it well posed.  The pre-buckling treatment of this document is
+therefore a prerequisite for multi-mode Koiter, not an alternative to it.
+
+Two pieces of the implementation stand between this and a working multi-mode
+analysis.  The symmetrisation of $\phi_{30}$ over distinct mode indices is
+established only for coinciding indices (Section~\ref{sec:limits}), and the
+row border $\boldsymbol{W}$ of the bordered system
+(Section~\ref{sec:secondorder}) carries one condition per retained Koiter
+mode while the null space of $\phi_2$ has as many dimensions as the cluster
+has members, so the two counts have to be brought into agreement before the
+extra modes can be retained rather than deflated.
 
 %==============================================================================
 \section{Consistency of the operators}
@@ -613,12 +761,13 @@ with the constant quadratic form
 $\partial^2\boldsymbol{\varepsilon}/
 \partial\boldsymbol{\bar{u}}\partial\boldsymbol{\bar{u}}$, which for
 Eq.~\ref{eq:strain} is $\boldsymbol{G}_x^\top\boldsymbol{G}_x$,
-$\boldsymbol{G}_\theta^\top\boldsymbol{G}_\theta$ and
-$\boldsymbol{G}_x^\top\boldsymbol{G}_\theta +
-\boldsymbol{G}_\theta^\top\boldsymbol{G}_x$ in the three strain components.
+$\boldsymbol{G}_y^\top\boldsymbol{G}_y$ and
+$\boldsymbol{G}_x^\top\boldsymbol{G}_y +
+\boldsymbol{G}_y^\top\boldsymbol{G}_x$ in the three strain components.
 
 %==============================================================================
 \section{Second-order fields and the orthogonality condition}
+\label{sec:secondorder}
 \label{sec:ortho}
 %==============================================================================
 
@@ -813,7 +962,7 @@ solutions.
 %==============================================================================
 
 The two verification cases are the composite cylinder of Sun~\S3.1 and the
-NASA shell AW-CYL-1-1 of Arbocz, Starnes and Nemeth (AIAA-2001-1392); they are
+NASA shell AW-CYL-1-1 of \citet{arbocz2001}; they are
 the same shell, so the ANILISA $n$-search of the latter provides reference
 values for both.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
 \left(r\sqrt{3(1-\nu_{12}^2)}\right)$.
@@ -825,11 +974,11 @@ values for both.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
 \toprule
  & $n$ & $\lambda_c$ & reference \\
 \midrule
-Arbocz, $n_\theta = 40$ & $10$ & $0.331413$ & $0.329163$ (ANILISA, $n=10$) \\
-Arbocz, $n_\theta = 60$ & $11$ & $0.330603$ & $0.328594$ (ANILISA, $n=11$) \\
+Arbocz, $n_y = 40$ & $10$ & $0.331413$ & $0.329163$ (ANILISA, $n=10$) \\
+Arbocz, $n_y = 60$ & $11$ & $0.330603$ & $0.328594$ (ANILISA, $n=11$) \\
                         &      &            & $0.327759$ (STAGS-A, $n=11$) \\
-Sun, $n_\theta = 40$    & $10$ & $0.346127$ & --- \\
-Sun, $n_\theta = 50$    & $10$ & $0.347244$ & --- \\
+Sun, $n_y = 40$    & $10$ & $0.346127$ & --- \\
+Sun, $n_y = 50$    & $10$ & $0.347244$ & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -847,16 +996,16 @@ point is left at the reference load, gives $0.365992$ instead.
 \toprule
  & $n$ & $b_{1111}$ & reference \\
 \midrule
-Arbocz, $n_\theta = 40$ & $10$ & $-0.335975$ & --- \\
-Arbocz, $n_\theta = 60$ & $11$ & $-0.356457$ & $-0.37605$ (ANILISA, $n=11$) \\
+Arbocz, $n_y = 40$ & $10$ & $-0.335975$ & --- \\
+Arbocz, $n_y = 60$ & $11$ & $-0.356457$ & $-0.37605$ (ANILISA, $n=11$) \\
                         &      &             & $-0.3772$ (Sun, Table~2) \\
-Sun, $n_\theta = 40$    & $10$ & $-0.230556$ & --- \\
-Sun, $n_\theta = 50$    & $10$ & $-0.222844$ & --- \\
+Sun, $n_y = 40$    & $10$ & $-0.230556$ & --- \\
+Sun, $n_y = 50$    & $10$ & $-0.222844$ & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The $n_\theta = 60$ value is within five per cent of the ANILISA coefficient
+The $n_y = 60$ value is within five per cent of the ANILISA coefficient
 for the same mode.  A negative $b$ means an imperfection sensitive shell,
 which is what this one is.
 
@@ -869,16 +1018,317 @@ was nine per cent low and the post-buckling coefficient had the wrong sign.
 The sign was at that time attributed to a single-mode expansion about a
 degenerate critical mode being unable to determine it, which was incorrect.
 Two meshes that did not even select the same critical mode, $n = 10$ at
-$n_\theta = 40$ against $n = 7$ at $n_\theta = 50$ for the Sun case, now
+$n_y = 40$ against $n = 7$ at $n_y = 50$ for the Sun case, now
 select $n = 10$ on both and agree to $0.3$ per cent in the buckling load and
 $3.4$ per cent in $b_{1111}$.
 
 The Newton-Raphson behaviour changed with it.  Each load step now takes a
 single iteration, with residuals falling $5.1\times10^{-5}$,
 $1.1\times10^{-5}$, $1.2\times10^{-6}$, $5.4\times10^{-8}$,
-$1.5\times10^{-9}$, and no step back-off anywhere.  The $n_\theta = 60$ mesh,
+$1.5\times10^{-9}$, and no step back-off anywhere.  The $n_y = 60$ mesh,
 which previously exhausted the iteration budget at every load step, converges
 in four of them.
+
+%==============================================================================
+\section{The variable-stiffness CTS model}
+\label{sec:cts}
+%==============================================================================
+
+The routines \texttt{fkoiter\_cylinder\_CTS\_circum} of
+\texttt{koiter\_cylinder\_CTS.py} and \texttt{koiter\_cylinder\_CTS\_sanders.py}
+apply the whole of the preceding development to the continuous-tow-shearing
+(CTS) variable-stiffness cylinders of dos~Santos and Castro,
+\emph{Lightweight design of variable-stiffness cylinders with reduced
+imperfection sensitivity enabled by continuous tow shearing and machine
+learning}, Materials \textbf{15} (2022) 4117.  The algorithm is taken
+literally from the constant-stiffness models, and a check in the test suite
+asserts that the shared regions of the two files are identical character for
+character, so only what is specific to the CTS model is documented here.
+
+\subsection{Why the axisymmetric reduction still applies}
+\label{sec:cts-axi}
+
+The parameterisation steers the tows along the \emph{axial} direction only,
+$\theta = \theta(x)$, and the tow shearing thickens the laminate as
+$h_{tow}/\cos\theta$, again a function of $x$ alone.  The stiffness is
+therefore uniform around the circumference, the cyclic shift of
+Section~\ref{sec:axisymmetric} remains a symmetry of every assembled operator,
+and the fundamental path of the perfect cylinder under uniform axial
+compression is still axisymmetric.  The Galerkin reduction of
+Eq.~\ref{eq:reduced-newton} carries over unchanged.
+
+Two consequences are worth stating explicitly, because they are easy to
+confuse:
+
+\begin{enumerate}\itemsep3pt
+  \item The reduction constrains the \textbf{pre-buckling state only}.  The
+        eigenvalue problem is assembled and solved on the full space, so
+        non-axisymmetric buckling modes are obtained exactly as they are in
+        the constant-stiffness models.  What the reduction removes is the
+        possibility of the pre-buckling iteration drifting off the
+        fundamental path, not the modes.
+  \item The \emph{premise} of the reduction --- that every buckling mode
+        making $\boldsymbol{K}_T$ singular is non-axisymmetric --- is
+        \textbf{not} satisfied everywhere in the CTS design space.  See
+        Section~\ref{sec:cts-spectrum}.
+\end{enumerate}
+
+Unlike the constant-stiffness models, the axial station spacing is not
+uniform: it is built from the transition length $t = r_{CTS}\sin|\theta_{c2} -
+\theta_{c1}|$ and the plateau lengths $c_1$ and $c_2$.  An assertion checks
+that the stations \texttt{mesh\_order} sorts the nodes into are the ones the
+axisymmetric basis is then built on, which a non-uniform $x$ grid could
+otherwise violate silently.
+
+\subsection{Length scales that size the mesh}
+\label{sec:cts-scales}
+
+Three scales control the discretisation.  With $r = 68$~mm, $L = 300$~mm and
+$h \simeq 0.8$~mm, the geometry of the cylinder used throughout the test
+suite, they are
+
+\begin{center}
+\begin{tabular}{lcl}
+\toprule
+scale & value & constrains \\
+\midrule
+$\sqrt{rh}$ & $7.4$~mm & --- \\
+edge boundary layer $1/\beta = \sqrt{rh}\,\big/\,[3(1-\nu^2)]^{1/4}$
+    & $5.8$~mm & $n_x$ \\
+buckling half-wave $\pi\sqrt{rh}\,\big/\,[12(1-\nu^2)]^{1/4}$
+    & $12.8$~mm & $n_x$ \\
+wavelength of the $2n$ harmonic, $\pi r/n$ & $21$~mm at $n{=}10$ & $n_y$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The axial mesh is set by the edge boundary layer.  With
+\texttt{NLprebuck=True} the non-linear pre-buckling deformation caused by the
+edge restraint is concentrated within a few multiples of $1/\beta$ of each
+end, and it is precisely that deformation which the expansion is about; with
+\texttt{NLprebuck=False} the requirement is much weaker, the linear
+pre-buckling state being smooth.  This is a demand the earlier
+implementation did not make, because expanding at the reference load left the
+boundary layer undeveloped.
+
+The circumferential mesh is set by the \emph{second-order field}, not by the
+buckling mode.  A mode with $n$ circumferential waves drives a second-order
+field carrying the harmonic $2n$ (Section~\ref{sec:limits}), so a mesh sized
+to resolve the mode itself samples the field that determines $b_{ijkl}$ at
+only about two nodes per wave.  Resolving the $2n$ harmonic with four nodes
+per wave requires $n_y \simeq 8n$.
+
+\subsection{Measured convergence}
+\label{sec:cts-convergence}
+
+The design below is representative of the parameterisation: $\theta_{c1} =
+30^\circ$, $\theta_{c2} = 60^\circ$, $n = 3$, $c_{2,ratio} = 0.5$, $r_{CTS} =
+50$~mm, giving $t = 25$~mm, $c_1 = 18.75$~mm and $c_2 = 25$~mm.  Sanders
+kinematics, \texttt{idealistic\_CTS=True}, \texttt{NLprebuck=False}, four
+integration points.  The axial mesh is refined with the circumferential one
+through \texttt{nxt}, which keeps the element aspect ratio between $1.0$ and
+$1.4$.
+
+\begin{center}
+\begin{tabular}{rrrrrrr}
+\toprule
+$n_y$ & $n_x$ & DOF & $\Delta x$ & $\Delta x\,\beta$ & $P_{cr}$~[N] &
+$\Delta P_{cr}$ \\
+\midrule
+ 30 & 23 &  6\,900 & $13.64$~mm & $2.37$ & $40982.6$ & $+6.65\%$ \\
+ 45 & 37 & 16\,650 & $ 8.33$~mm & $1.45$ & $38893.0$ & $+1.21\%$ \\
+ 60 & 49 & 29\,400 & $ 6.25$~mm & $1.09$ & $38572.9$ & $+0.38\%$ \\
+ 80 & 71 & 56\,800 & $ 4.29$~mm & $0.74$ & $38452.1$ & $+0.06\%$ \\
+100 & 97 & 97\,000 & $ 3.12$~mm & $0.54$ & $38427.6$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The buckling load converges monotonically, and it does so as a function of
+$\Delta x\beta$: the error falls below one per cent once the axial element is
+about as long as the boundary layer, $\Delta x \simeq 1/\beta$, and below one
+tenth of a per cent at $\Delta x \simeq 0.75/\beta$.  The run times on one
+core were $24$, $65$, $91$, $150$ and $323$~seconds.
+
+The post-buckling coefficient behaves completely differently.  On the same
+five meshes $b_{1111}$ was
+\[
+  -2.6\times10^{-3},\quad
+  +1.2\times10^{-2},\quad
+  +1.9\times10^{-3},\quad
+  +3.7\times10^{-4},\quad
+  +5.0\times10^{-5}
+\]
+changing sign and two orders of magnitude.  This is not a mesh resolution
+problem and no refinement repairs it; the cause is the buckling spectrum of
+this particular design, treated next.
+
+\subsection{The same design with a non-linear pre-buckling state}
+\label{sec:cts-nl}
+
+Repeating the study with \texttt{NLprebuck=True} changes both numbers and
+behaviour:
+
+\begin{center}
+\begin{tabular}{rrrrrrr}
+\toprule
+$n_y$ & $n_x$ & $P_{cr}$~[N] & $\Delta P_{cr}$ & $n$ & $b_{1111}$ &
+$\Delta b_{1111}$ \\
+\midrule
+30 & 23 & $35087.8$ & $+24.59\%$ & $4$ & $-0.0565$ & $-62.7\%$ \\
+45 & 37 & $28517.4$ & $+1.26\%$  & $7$ & $-0.1791$ & $+18.4\%$ \\
+60 & 49 & $28309.7$ & $+0.52\%$  & $7$ & $-0.1564$ & $+3.3\%$ \\
+80 & 71 & $28161.9$ & ---        & $7$ & $-0.1514$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three things change for the better.  The buckling load is $27$ per cent below
+the linear-pre-buckling value of Section~\ref{sec:cts-convergence}, as the
+edge restraint would lead one to expect.  The critical wave number settles at
+$n = 7$ from $n_y = 45$ upwards instead of wandering.  And $b_{1111}$
+\emph{converges}: $-0.179$, $-0.156$, $-0.151$, monotonically and without
+changing sign, to within $3.3$ per cent at $n_y = 60$, where the linear
+analysis of Section~\ref{sec:cts-convergence} produced two orders of
+magnitude of sign-changing noise on the same meshes.  The post-buckling
+coefficient of a CTS cylinder is therefore a computable quantity, but only
+about a non-linear pre-buckling state.
+
+The coarsest mesh is useless here in a way it was not for the linear
+analysis: $n_y = 30$ is $25$ per cent off in $P_{cr}$ and selects a different
+mode.  That is the boundary-layer requirement of
+Section~\ref{sec:cts-scales} asserting itself, the expansion point now living
+where the edge restraint acts.
+
+\medskip
+\noindent
+\textbf{The default iteration budget is not enough.}  With the default
+\texttt{NLprebuck\_maxiter=12} the $n_y = 45$ run exhausted the budget and
+stopped at $\lambda_b/\lambda_c = 0.9933$, short of the $0.995$ requested,
+after one Newton-Raphson back-off and two overshoot-and-step-back cycles;
+the table above was produced with \texttt{NLprebuck\_maxiter=30}, which
+converged every mesh with no warning at all.  The default was tuned on the
+constant-stiffness shells of Section~\ref{sec:results}, where $\lambda_c$
+moves less with $\lambda_b$ and four to seven load steps suffice.  A CTS
+design with a dense spectrum spends steps backing off, and the budget has to
+be raised accordingly.  The symptom is explicit --- the run prints
+\texttt{WARNING: the iterative eigenvalue algorithm stopped at
+lambda\_b/lambda\_c = ...} --- and must not be ignored, because a state
+stopped short of the requested neighbourhood is exactly the regime
+Section~\ref{sec:step} exists to avoid.
+
+\subsection{The buckling spectrum is design-dependent}
+\label{sec:cts-spectrum}
+
+The circumferential harmonic content of the lowest modes differs
+qualitatively across the design space.  Measured on the $n_y = 60$ mesh with
+a \emph{linear} pre-buckling state:
+
+\begin{center}
+\begin{tabular}{lccl}
+\toprule
+design & critical mode & $\mu_1/\mu_0$ & gap to the next distinct mode \\
+\midrule
+$\theta_{c1}=\theta_{c2}=45^\circ$ & axisymmetric, $n=0$ & $1.00018$ & $0.63\%$ \\
+$\theta_{c1}=30^\circ$, $\theta_{c2}=60^\circ$, $n{=}3$
+                                   & axisymmetric, $n=0$ & $1.00344$ & $0.34\%$ \\
+$\theta_{c1}=\theta_{c2}=60^\circ$ & pair, $n=3$         & $1.00000$ & $14.19\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The $\pm60^\circ$ design is the textbook situation the single-mode expansion
+assumes: a clean degenerate pair, well separated from everything above it, and
+with $n = 3$ the $2n = 6$ harmonic is sampled by ten nodes per wave already at
+$n_y = 60$.
+
+The other two are not.  Their critical mode is \emph{axisymmetric}, and the
+first six multipliers lie within one per cent of each other, a dense cluster
+rather than an isolated pair.  The single-mode $b_{ijkl}$ is then not
+determinate, the expansion being made about one member of a cluster the mesh
+reorders from one refinement to the next, and that is exactly the
+oscillation of Section~\ref{sec:cts-convergence}.  Worse, the premise of the
+axisymmetric reduction is violated: the critical mode lies \emph{inside} the
+subspace the pre-buckling problem is solved in.
+
+\medskip
+\noindent
+\textbf{The non-linear pre-buckling state removes the pathology.}  Repeating
+the steered design with \texttt{NLprebuck=True} moves the critical mode off
+the axisymmetric harmonic entirely: it comes out at $n = 4$ on the
+$n_y = 30$ mesh and $n = 7$ on both $n_y = 45$ and $n_y = 60$, and
+$b_{1111}$ becomes $-0.179$ and $-0.156$ on the latter two, values of the
+same order as the reference shells of Section~\ref{sec:results} rather than
+the near-zero noise of the linear case.  The axisymmetric critical mode is
+therefore an artefact of expanding about the \emph{linear} pre-buckling
+state, in which the edge restraint has not yet developed, and not a property
+of the design.  This is the same separation of the spectrum documented in
+Section~\ref{sec:howmany} for the constant-stiffness shells, seen here in its
+sharpest form.
+
+The practical consequence is a warning about screening.  A spectrum computed
+with \texttt{NLprebuck=False} does not predict the one computed with
+\texttt{NLprebuck=True}, neither the wave number nor the clustering, so the
+check recommended in Section~\ref{sec:cts-recommendation} has to be run with
+the same setting as the production analysis.  And if a design genuinely does
+retain an axisymmetric critical mode under \texttt{NLprebuck=True}, the
+failure is silent: the load stepping halts just short of the bifurcation
+point, where the reduced tangent is still regular, and reports convergence
+with no indication that the state it stopped at is about to bifurcate
+\emph{within} the subspace it was computed in.  The diagnostic is the
+harmonic content of the critical mode, never the convergence history.
+
+\subsection{Recommendation}
+\label{sec:cts-recommendation}
+
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Always inspect the spectrum before using $b_{ijkl}$.}
+        Run once with \texttt{koiter\_num\_modes=0}, which returns
+        immediately after the eigenvalue analysis and costs a small fraction
+        of a full run, and check (i) that the critical mode is a
+        non-axisymmetric degenerate pair and (ii) that the next distinct
+        multiplier is separated by appreciably more than
+        \texttt{NLprebuck\_eps1}.  If either fails, the buckling load is
+        still meaningful but the single-mode $b_{ijkl}$ is not, whatever the
+        mesh.  Run this screening with the \emph{same} \texttt{NLprebuck}
+        setting as the production analysis: Section~\ref{sec:cts-spectrum}
+        shows the two give different wave numbers and different clustering on
+        the same design.
+  \item \textbf{For the buckling load}, size the axial mesh by the boundary
+        layer: $\Delta x \le 1/\beta$ for about half a per cent, $\Delta x
+        \simeq 0.75/\beta$ for about a tenth.  For the test-suite geometry
+        that is $n_y = 60$ and $n_y = 80$ respectively, with
+        \texttt{nxt} chosen to hold the aspect ratio near one.  Use the
+        finer of the two with \texttt{NLprebuck=True}, where the boundary
+        layer carries the expansion point.
+  \item \textbf{For $b_{ijkl}$, when the spectrum permits it at all}, take
+        $n_y \simeq 8n$ with $n$ the measured circumferential wave
+        number, so that the $2n$ harmonic gets four nodes per wave.  For the
+        $\pm60^\circ$ design, $n = 3$, this is satisfied from $n_y = 24$
+        upwards, and the mesh is then governed by the buckling load
+        requirement instead.
+  \item \textbf{Do not transfer the $240$ elements of the reference.}  The
+        $240$ S4R elements around the circumference used for the Abaqus
+        cross-check in the reference are a linear reduced-integration shell
+        requirement.  The BFSC element is $C^1$ with cubic interpolation and
+        ten degrees of freedom per node and resolves the same harmonic with
+        far fewer elements; $n_y = 60$ to $80$ is the corresponding
+        range here.
+  \item \textbf{Raise \texttt{NLprebuck\_maxiter}.}  The default $12$ is
+        a constant-stiffness figure.  Use $30$ for CTS designs, and treat the
+        \texttt{WARNING} about stopping short of
+        $1 - \texttt{NLprebuck\_eps1}$ as a failure rather than a note: the
+        expansion is then made about a state that is not in the neighbourhood
+        of the bifurcation point, which is the very thing
+        Section~\ref{sec:step} is for.
+  \item \textbf{Cost.}  A full run at $n_y = 80$ takes of the order of
+        minutes with \texttt{NLprebuck=False} and several times that with
+        \texttt{NLprebuck=True}, the load stepping solving an eigenvalue
+        problem per step.  In a design-of-experiments loop over thousands of
+        samples, as the reference performs, this is the binding constraint,
+        and the screening run of item~1 is the part worth doing on every
+        sample.
+\end{enumerate}
 
 %==============================================================================
 \section{Known limitations}
@@ -889,10 +1339,12 @@ in four of them.
   \item \textbf{Degenerate critical modes.}  Condition~\ref{eq:condition}
         supplies one equation per retained mode while the null space is
         larger, and the rotation inside the degenerate pair still moves
-        $b_{1111}$ by sixteen per cent on the $n_\theta = 40$ mesh.  The
+        $b_{1111}$ by sixteen per cent on the $n_y = 40$ mesh.  The
         canonicalisation of Section~\ref{sec:canonical} makes the choice
         reproducible rather than arbitrary; it does not make it converged.
-        Multi-mode Koiter is the consistent treatment.
+        Multi-mode Koiter is the consistent treatment, and
+        Section~\ref{sec:howmany} sizes it: six to eight modes, three to four
+        degenerate pairs, for the reference shells.
   \item \textbf{Resolution of the second-order field.}  The second-order field
         carries the harmonic $2n$, which the meshes used here sample with
         about two nodes per wave.  This, and not the expansion itself, is what
@@ -901,6 +1353,21 @@ in four of them.
         identity of Eq.~\ref{eq:cconst} was established for coinciding mode
         indices, which covers the single-mode case exercised here; the general
         multi-mode symmetrisation remains to be worked out.
+  \item \textbf{Axisymmetric critical modes.}  The reduction of the
+        pre-buckling problem to the axisymmetric subspace
+        (Section~\ref{sec:axisymmetric}) assumes that no buckling mode lies
+        in that subspace.  With a \emph{linear} pre-buckling state parts of
+        the CTS design space violate it, the critical mode there being
+        axisymmetric (Section~\ref{sec:cts-spectrum}).  On every design
+        tried, switching to \texttt{NLprebuck=True} moved the critical mode
+        off the axisymmetric harmonic and restored the assumption, so the
+        violation has not been observed where the reduction is actually
+        relied upon --- but it has not been \emph{excluded} either, and it
+        would fail silently, the load stepping halting just short of the
+        bifurcation point where the reduced tangent is still regular and
+        reporting convergence.  No part of the code inspects the harmonic
+        content of the critical mode, which is the only reliable
+        diagnostic.
   \item \textbf{Load control.}  The scheme of Section~\ref{sec:step} now
         reaches the requested neighbourhood of the bifurcation point on all
         meshes tried, but it remains load controlled.  The extrapolated
@@ -914,5 +1381,125 @@ in four of them.
         cent of $n_{int}=5$ and $6$, while $n_{int}=2$ under-integrates and
         produces a rank-deficient element.
 \end{enumerate}
+
+%==============================================================================
+\appendix
+\section{Reproducing the numbers}
+\label{sec:appendix}
+%==============================================================================
+
+Every figure in this document that is not a literature value is produced by a
+script kept in the repository, so that the document and the code cannot drift
+apart.  Two kinds of script are involved.  The \emph{verification studies} of
+Appendix~\ref{sec:appendix-scripts} sweep meshes and report; they take minutes
+to tens of minutes and assert nothing.  The \emph{tests} of
+Appendix~\ref{sec:appendix-tests} assert, run under \texttt{pytest}, and are
+the ones that fail if a change breaks something.
+
+All of them require \texttt{bfsccylinder} $\geq 0.6.0$, whose tangent
+stiffness matrix is consistent with the internal force vector; several of the
+figures quoted here measure exactly that consistency, and every one of them
+changes on earlier versions (Section~\ref{sec:results}).
+
+\subsection{Verification studies}
+\label{sec:appendix-scripts}
+
+In \texttt{doc/verification/}.  Each puts the repository root first on
+\texttt{sys.path}, so an installed copy of the package cannot shadow the
+working tree, and each is run directly, for instance
+\begin{center}
+\texttt{python doc/verification/kinematics\_vs\_element.py}
+\end{center}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+script & produces & runtime \\
+\midrule
+\texttt{kinematics\_vs\_element.py}
+  & Section~\ref{sec:consistency} & seconds \\
+\texttt{tangent\_consistency.py}
+  & Section~\ref{sec:tangent} & seconds \\
+\texttt{cts\_vs\_constant\_stiffness.py}
+  & Section~\ref{sec:cts} & $\sim$10~min \\
+\texttt{cts\_mesh\_convergence.py}
+  & table of Section~\ref{sec:cts-convergence} & $\sim$12~min \\
+\texttt{cts\_mesh\_convergence.py nl}
+  & table of Section~\ref{sec:cts-nl} & $\sim$35~min \\
+\texttt{cts\_mode\_spectrum.py}
+  & table of Section~\ref{sec:cts-spectrum} & $\sim$20~min \\
+\texttt{reference\_mode\_cluster.py}
+  & table of Section~\ref{sec:howmany} & $\sim$5~min \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Two of these deserve a note.
+\texttt{kinematics\_vs\_element.py} rebuilds $\boldsymbol{f}_{int}$ and the
+second variation from the strain measures the Koiter expansion assumes and
+compares them against the compiled element; it includes a deliberately wrong
+control, the Sanders element driven with von Karman kinematics, which fails at
+$7.8\times10^{-4}$ and so establishes that the agreement at $10^{-16}$ is not
+vacuous.  \texttt{cts\_mesh\_convergence.py} runs with
+\texttt{NLprebuck\_maxiter=30} rather than the default, for the reason given
+in Section~\ref{sec:cts-nl}.
+
+\subsection{Literature verification cases}
+\label{sec:appendix-tests}
+
+In \texttt{tests/}, run with \texttt{pytest} from that directory.  The
+reference values and the meshes they belong to are documented in the tests
+themselves; the regression values are for their mesh and are not converged,
+which the comments there state case by case.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+test & shell & reference \\
+\midrule
+\texttt{test\_koiter\_cylinder\_newton\_raphson.py}
+  & Sun~\S3.1; AW-CYL-1-1
+  & \citet{sun2020}; \citet{arbocz2001} \\
+\texttt{test\_koiter\_cylinder\_Waters.py}
+  & Waters shell
+  & Arbocz and Starnes (2002) \\
+\texttt{test\_koiter\_cylinder\_Waters\_sanders.py}
+  & Waters shell
+  & Arbocz and Starnes (2002) \\
+\texttt{test\_koiter\_cylinder\_CTS.py}
+  & CTS, constant-stiffness limit
+  & \citet{dossantos2022} \\
+\texttt{test\_koiter\_cylinder\_CTS\_sanders.py}
+  & CTS, constant-stiffness limit
+  & \citet{dossantos2022} \\
+\texttt{test\_buckling\_mode\_cluster.py}
+  & Sun~\S3.1
+  & Section~\ref{sec:howmany} \\
+\texttt{test\_linBuck\_VAFW.py}
+  & VAFW cylinders
+  & linear buckling \\
+\texttt{test\_Zhihua\_error.py}
+  & VAFW cylinder
+  & linear buckling \\
+\texttt{test\_cts\_shares\_nlprebuck\_algorithm.py}
+  & ---
+  & source parity \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The last of these compares the CTS and \texttt{newton\_raphson} modules
+character by character over the regions that implement the algorithm of this
+document.  The algorithm was spliced from one into the other rather than
+retyped, and that test is what keeps the two from diverging silently; the
+mesh generation, the per-integration-point $ABD$ of a variable-stiffness
+laminate, and the CTS-specific commentary are deliberately excluded from the
+comparison.
+
+%==============================================================================
+\bibliographystyle{plainnat}
+\bibliography{nlprebuck_implementation}
 
 \end{document}
