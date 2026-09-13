@@ -20,10 +20,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 import numpy as np
 from composites import laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import (
+from bfsccylinder_models.koiter_cylinder_sanders import (
         fkoiter_cyl_SS3 as f_sa)
-from bfsccylinder_models.koiter_cylinder_newton_raphson import (
-        fkoiter_cyl_SS3 as f_vk)
+from bfsccylinder_models.koiter_cylinder import fkoiter_cyl_SS3 as f_vk
 
 CASES = []
 
