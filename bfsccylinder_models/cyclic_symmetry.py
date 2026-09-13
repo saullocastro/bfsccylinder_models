@@ -167,21 +167,31 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     sign of the circumferential wave number, and every rotation of a pair is
     again a pair of buckling modes. Which member of it comes out of the eigen
     solver is decided by round off, so it changes with the BLAS
-    implementation, and b_ijkl is not invariant under that rotation: the
-    second order field of a mode with n circumferential waves carries the
-    harmonic 2n, which a mesh sized for the buckling mode itself barely
-    resolves. Measured on the Sun et al. case of the test suite, ny = 40,
+    implementation, and b_ijkl is not invariant under that rotation. Measured
+    on the ny = 40 meshes of the test suite, both buckling with n = 10,
     rotating the critical pair by 30 degrees moves b_1111 from -0.230556 to
-    -0.192752, 16%, with everything else, the pre-buckling state and the
-    buckling load included, unchanged to eleven digits. Before the consistent
-    tangent of bfsccylinder 0.6.0 the same rotation moved it from -0.0008 to
-    0.2744, sign included, so most of that dependence was the tangent rather
-    than the mesh; what is left is the mesh.
+    -0.192752 on the Sun et al. case and from -0.335975 to -0.260672 on the
+    Arbocz and Starnes case, with the pre-buckling state and the buckling
+    load unchanged to eleven digits.
+
+    Almost all of that is the normalization of the mode by its largest NODAL
+    translation, and not the resolution of the harmonic 2n of the second
+    order field. The modes of these anisotropic laminates are skewed, their
+    crest drifting around the circumference along the axis, and the largest
+    nodal value equals the crest amplitude only where the crest falls on a
+    node. Normalized by the crest amplitude instead, the envelope of the pair,
+    the same rotation moves b_1111 by 2.9% and 1.1%. What remains is the
+    discrete symmetry: up to the normalization, b_1111 over a pair that the
+    shift by one element rotates by 2*pi*n/ny can depend on the rotation only
+    through its fourth harmonic, and only when 4n is a multiple of ny, which
+    both ny = 40 meshes are. On the ny = 60 Arbocz and Starnes mesh, n = 11,
+    the crest normalized b_1111 of the canonical member and of the member
+    rotated by 30 degrees agree to six digits.
 
     Each pair is therefore rotated to the member whose crest falls on the
     y = 0 generator, a property of the mesh and not of the arithmetic. That
-    makes b_ijkl reproducible; it does not make it mesh converged, and only a
-    mesh that resolves the harmonic 2n does.
+    makes b_ijkl reproducible; it does not make it mesh converged, nor free of
+    the error of sampling a skewed crest at the nodes.
 
     The partner of a mode need not be among the ones the eigen solver
     returned. A Krylov method builds its subspace from a single starting

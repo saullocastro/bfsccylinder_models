@@ -619,16 +619,34 @@ solver returns is decided by round-off, and changes with the BLAS
 implementation.
 
 That would not matter if the post-buckling coefficients were invariant under
-that rotation, and they are not.  The second-order field of a mode with $n$
-circumferential waves carries the harmonic $2n$, which a mesh sized for the
-buckling mode itself barely resolves.  Measured on the case of
-Section~\ref{sec:results} with $n_y = 40$ and $n = 10$, rotating the
-critical pair by $30$ degrees moves $b_{1111}$ from $-0.230556$ to
-$-0.192752$, sixteen per cent, with the pre-buckling state and the buckling
-load unchanged to eleven digits.  Before the tangent of
-Section~\ref{sec:tangent} was made consistent the same rotation moved it from
-$-0.0008$ to $+0.2744$, sign included, so most of that dependence was the
-tangent and what remains is the mesh.
+that rotation, and they are not.  Measured on the Sun shell with $n_y = 40$
+and $n = 10$, rotating the critical pair by $30$ degrees moves $b_{1111}$ from
+$-0.230556$ to $-0.192752$, sixteen per cent, with the pre-buckling state and
+the buckling load unchanged to eleven digits; on the Arbocz shell, with the
+same $n_y$ and $n$, it moves from $-0.335975$ to $-0.260672$.  Before the
+tangent of Section~\ref{sec:tangent} was made consistent the first of these
+moved from $-0.0008$ to $+0.2744$, sign included.
+
+Almost all of what remains is the normalisation of the mode, and not, as this
+section used to say, the resolution of the harmonic $2n$ of the second-order
+field.  The modes are normalised by their largest \emph{nodal} translation,
+and the modes of these anisotropic laminates are skewed, their crest drifting
+around the circumference along the axis.  The largest nodal value equals the
+crest amplitude only where the crest falls on a node, and $b_{1111}$, which
+scales with the square of the amplitude, inherits the shortfall twice.
+Section~\ref{sec:normalisation} measures it.  Normalised by the crest
+amplitude, the same rotation moves $b_{1111}$ by $2.9$ per cent on the Sun
+shell and $1.1$ per cent on the Arbocz shell.
+
+What is left after that is the discrete symmetry.  Up to the normalisation,
+$b_{1111}$ is a quartic form over the pair divided by a quadratic one, and the
+shift by one element, which leaves both invariant, rotates the pair by
+$2\pi n/n_y$.  The coefficient can therefore depend on the rotation only
+through the fourth harmonic of the rotation angle, and only when $4n$ is a
+multiple of $n_y$, which both $n_y = 40$ meshes with $n = 10$ are.  On the
+Arbocz shell with $n_y = 60$ and $n = 11$ the crest-normalised $b_{1111}$ of
+the canonical member and of the member rotated by $30$ degrees agree to six
+digits, $-0.357386$.
 
 \subsection{Fixing the member}
 
@@ -654,8 +672,87 @@ field being singular along it, the error is then amplified without bound.
 
 This makes the coefficients reproducible: $9\times10^{-9}$ between a single
 threaded and a multi threaded run, against a sign difference between operating
-systems before.  It does not make them mesh converged, and only a mesh that
-resolves the harmonic $2n$ would.
+systems before.  It does not make them mesh converged
+(Section~\ref{sec:gap}), nor free of the error of sampling a skewed crest at
+the nodes, which the normalisation of Section~\ref{sec:normalisation} removes.
+
+\subsection{Normalising the modes}
+\label{sec:normalisation}
+
+The post-buckling coefficients belong to a mode of a given amplitude,
+$b_{1111}$ scaling with its square, and Koiter's imperfection-sensitivity law
+combines $b$ with an imperfection amplitude $\bar{\xi}$ measured with the same
+normalisation.  Imperfections of shells are quoted as the largest radial
+deviation over the thickness, and the finite element post-buckling analyses
+that are compared with ANILISA scale the buckling modes ``such that the
+maximum radial displacement is equal to the shell thickness''
+\citep{rahman2007}.  That maximum is the one of the displacement field: a
+semi-analytical solution such as ANILISA has no nodes to sample it at.
+
+The models normalise instead by the largest \emph{nodal} translation
+$\sqrt{u^2 + v^2 + w^2}$.  Taking the translation rather than $w$ is not what
+matters, the two being within $0.2$ per cent of each other on every mesh
+measured; taking the nodes is.  The table gives, for the mode as the models
+scale it, the crest amplitude of $w$ in units of $h$, measured in two ways.
+\emph{At the nodes}, as the envelope $\sqrt{w_1^2 + w_2^2}$ of the pair, which
+is the crest around the circumference of a single harmonic at every axial
+station.  \emph{Between the nodes} as well, following that envelope along the
+axis with the cubic Hermite interpolation of the element in $w$ and $w_{,x}$,
+which reproduces the $w$ of the compiled element along an element edge to
+$10^{-16}$.  The last two columns are $b_{1111}$ as the models return it and
+divided by the square of the crest amplitude.
+
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+ & $n_y$ & $n_x$ & crest at nodes & crest & $b_{1111}$, nodal & $b_{1111}$, crest \\
+\midrule
+Arbocz, canonical      & 40  & 17 & 1.1296 & 1.1326 & $-0.33598$ & $-0.26193$ \\
+Arbocz, rotated $30^\circ$ & 40 & 17 & 1.0003 & 1.0030 & $-0.26067$ & $-0.25914$ \\
+Sun, canonical         & 40  & 11 & 1.0805 & 1.2214 & $-0.23056$ & $-0.15456$ \\
+Sun, rotated $30^\circ$ & 40 & 11 & 1.0021 & 1.1328 & $-0.19275$ & $-0.15022$ \\
+\midrule
+Arbocz & 60 & 25 & 1.0000 & 1.0021 & $-0.35646$ & $-0.35498$ \\
+       & 60 & 31 & 1.0011 & 1.0287 & $-0.37865$ & $-0.35781$ \\
+       & 60 & 37 & 1.0010 & 1.0168 & $-0.36956$ & $-0.35744$ \\
+       & 60 & 43 & 1.0001 & 1.0003 & $-0.35750$ & $-0.35727$ \\
+       & 60 & 51 & 1.0000 & 1.0000 & $-0.35742$ & $-0.35739$ \\
+rotated $30^\circ$ & 60 & 51 & 1.0000 & 1.0000 & $-0.35740$ & $-0.35739$ \\
+       & 60 & 75 & 1.0000 & 1.0005 & $-0.35777$ & $-0.35741$ \\
+       & 88 & 25 & 1.0058 & 1.0075 & $-0.36596$ & $-0.36055$ \\
+       & 88 & 37 & 1.0007 & 1.0181 & $-0.37631$ & $-0.36305$ \\
+       & 88 & 43 & 1.0033 & 1.0036 & $-0.36550$ & $-0.36285$ \\
+       & 88 & 51 & 1.0037 & 1.0037 & $-0.36571$ & $-0.36299$ \\
+       & 88 & 61 & 1.0023 & 1.0049 & $-0.36669$ & $-0.36309$ \\
+       & 120 & 51 & 1.0002 & 1.0002 & $-0.36430$ & $-0.36413$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three things follow.  On the meshes of the test suite the crest the nodes
+miss is not a small correction: $13$ per cent on the Arbocz shell with
+$n_y = 40$, and $22$ per cent on the Sun shell, whose $n_x = 11$ leaves axial
+stations $36$~mm apart, which moves $b_{1111}$ by $22$ and $33$ per cent.
+It is also what made $b_{1111}$ oscillate with $n_x$: normalised at the nodes
+the $n_y = 60$ column swings from $-0.3565$ to $-0.3787$ and back, while
+normalised by the crest it stays within $0.8$ per cent, and within $0.05$ per
+cent from $n_x = 37$; the same holds within $0.07$ per cent at $n_y = 88$.
+And with the crest normalisation the coefficient is invariant under the
+rotation of the pair wherever the discrete symmetry lets it be, the two
+members agreeing to six digits at $n_y = 60$.
+
+The crest amplitude of the radial displacement is therefore the normalisation
+to use: it is a property of the mode rather than of the mesh, and it is the
+one the reference coefficients are defined with.  The Waters shell of
+\texttt{tests/test\_koiter\_cylinder\_Waters\_sanders.py} does not depend on
+the choice, its $n = 7$ mode having its crest on nodes both around the
+circumference and along the axis to $10^{-6}$, so its agreement with DIANA
+holds under either.  The models still normalise at the nodes: switching
+changes the regression values of the test suite, and for a mode that is not a
+single circumferential harmonic the pair envelope is no longer the crest, so
+the maximum would have to be taken over the fields of the elements themselves.
+Every figure of the table comes from
+\texttt{doc/verification/reference\_b\_convergence.py}.
 
 \subsection{How many modes the expansion actually needs}
 \label{sec:howmany}
@@ -683,16 +780,21 @@ Arbocz, \texttt{NLprebuck=True}        & 2 & 3 & 4 & $0.99\%$ \\
 
 Two readings of this table matter.
 
-The first is that the single-mode expansion retains \emph{one} eigenvector out
-of six or eight.  Its very first omission is the degenerate partner of the
-critical mode, which Section~\ref{sec:canonical} goes to some trouble to
-construct and then discards.  That alone bounds what the single-mode
-coefficient can be expected to reproduce, and it is consistent with the
-residual five per cent between $b_{1111}$ and the ANILISA value of
-Section~\ref{sec:results} surviving every mesh refinement tried.  Closing the
-$1\%$ cluster requires \texttt{koiter\_num\_modes} $= 6$ for the Arbocz shell
-and $8$ for the Sun shell; closing only the $0.5\%$ cluster requires $4$ and
-$6$.  In pairs, which is the natural unit here, that is three to four pairs.
+The first is the size of a multi-mode expansion.  The single-mode expansion
+retains \emph{one} eigenvector out of six or eight, and its very first
+omission is the degenerate partner of the critical mode.  Closing the $1\%$
+cluster requires \texttt{koiter\_num\_modes} $= 6$ for the Arbocz shell and
+$8$ for the Sun shell; closing only the $0.5\%$ cluster requires $4$ and $6$.
+In pairs, which is the natural unit here, that is three to four pairs.
+
+What this count does \emph{not} bound is the agreement of the single-mode
+$b_{1111}$ with the literature.  The coefficients of ANILISA and of Sun~Table~2
+are single-mode coefficients as well, and a multi-mode expansion does not
+compute a better approximation of them: it computes a different quantity, the
+interaction coefficients $b_{ijkl}$ of the retained modes, whose
+imperfection sensitivity follows from the coupled amplitude equations rather
+than from $b_{1111}$ alone.  Matching the reference $b$ is a question of
+discretisation, examined in Section~\ref{sec:gap}.
 
 The second is that the non-linear pre-buckling state does not merely move the
 modes, it \emph{separates} them.  With \texttt{NLprebuck=False} the cluster
@@ -704,14 +806,14 @@ then is ``the cluster'' a well-defined set, and only then is a multi-mode
 truncation of it well posed.  The pre-buckling treatment of this document is
 therefore a prerequisite for multi-mode Koiter, not an alternative to it.
 
-Two pieces of the implementation stand between this and a working multi-mode
-analysis.  The symmetrisation of $\phi_{30}$ over distinct mode indices is
-established only for coinciding indices (Section~\ref{sec:limits}), and the
-row border $\boldsymbol{W}$ of the bordered system
-(Section~\ref{sec:secondorder}) carries one condition per retained Koiter
-mode while the null space of $\phi_2$ has as many dimensions as the cluster
-has members, so the two counts have to be brought into agreement before the
-extra modes can be retained rather than deflated.
+Two pieces of the implementation used to stand between this and a multi-mode
+analysis.  The constant of the orthogonality condition was taken from the
+symmetrisation of $\phi_{30}$, which is exact only for coinciding mode
+indices, and the row border of the bordered system carried one weighted
+condition per Koiter mode while the null space of $\phi_2$ has more
+directions than that.  Both are now generalised
+(Section~\ref{sec:secondorder}); what of the multi-mode path remains
+unchecked is listed in Section~\ref{sec:limits}.
 
 %==============================================================================
 \section{Consistency of the operators}
@@ -778,10 +880,38 @@ The second-order fields $\boldsymbol{\bar{u}}_{ij}$ solve
 	\phi_2\,\boldsymbol{\bar{u}}_{ij} = \boldsymbol{g}_{ij},
 	\qquad
 	\boldsymbol{g}_{ij} = -\frac{1}{2}\,\phi_{3,ij}
-	  - \frac{1}{m}\sum_{k} a_{kij}\,\lambda_k\,\phi_{20,k}
+	  - \sum_{l} z_{ij,l}\,\phi_{20,l}
 \end{equation}
 
-\noindent with $m$ the number of Koiter modes.  By construction $\phi_2$ is
+\noindent with the sum over the $m$ Koiter modes.  The coefficient $z_{ij,l}$
+is that of $\xi_i\xi_j$ in $(\lambda-\lambda_l)\,\xi_l$, the load term of mode
+$l$, and the same terms of the equilibrium equations projected onto the Koiter
+modes, along which $\phi_2$ vanishes, are the amplitude equations that fix it:
+\begin{equation}\label{eq:zij}
+	\sum_l T_{kl}\,z_{ij,l}
+	= -\frac{1}{2}\,\phi_{3,ij}\cdot\delta\boldsymbol{\bar{u}}_k,
+	\qquad
+	T_{kl} = \phi_{20,k}\cdot\delta\boldsymbol{\bar{u}}_l
+\end{equation}
+
+\noindent This makes $\boldsymbol{g}_{ij}$ orthogonal to every Koiter mode.
+For modes orthogonal with respect to $T$ it gives $z_{ij,l} = \lambda_l
+a_{lij}$, with $a$ of Eq.~\ref{eq:a-coefficient}, which for a single mode is
+the substitution $\lambda - \lambda_c = \lambda_c a\xi$.  The implementation
+used to divide that term by $m$, which leaves $\boldsymbol{g}_{ij}$ orthogonal
+to the modes for $m = 1$ only, the column border of the bordered system then
+absorbing the remainder along the modes themselves rather than along
+$\phi_{20}$.  \texttt{doc/verification/second\_order\_rhs.py} compares the
+three forms on a polynomial energy with two simultaneously critical modes, a
+non-linear fundamental path and non-zero $a_{ijk}$, written in coordinates
+that are not orthonormal.  Along a post-buckling ray of the perfect system the
+residual of the equilibrium equations is $O(s^3)$ with
+Eq.~\ref{eq:zij} and $O(s^2)$ with the factor $1/m$; with $z_{ij,l} =
+\lambda_l a_{lij}$ it is $O(s^3)$ for $T$-orthogonal modes and $O(s^2)$
+otherwise.  For a cylinder under axial compression
+$\phi_{3,ij}\cdot\delta\boldsymbol{\bar{u}}_k$ vanishes, the harmonics
+$n_i \pm n_j$ never matching $n_k$ within the cluster, so the correction
+leaves every result of this document unchanged.  By construction $\phi_2$ is
 singular, its null space being spanned by the buckling modes.  Consequently
 Eq.~\ref{eq:secondorder} determines $\boldsymbol{\bar{u}}_{ij}$ only up to an
 arbitrary element of that null space, and a plain sparse solve followed by a
@@ -805,27 +935,88 @@ element form is Sun~Eq.~(33):
 	\boldsymbol{\hat{u}}_{,\lambda} = 0
 \end{equation}
 
-Two observations turn this into something directly computable.  The bracket in
-the first term is the load-parameter derivative of the tangent operator,
-$\partial \phi_2/\partial\lambda$, so the first term is exactly the
-contraction stored as \texttt{phi20\_a[k]}.  The second term is a constant,
-which follows from $\phi_{30}$ without any new element integral: $\phi_{30,ij}$
-is assembled as one half of the quadrature weight times the sum of six
-contractions which, when all mode indices coincide, are equal to one another
-by the symmetry of the constitutive matrix and of the quadratic form.  Hence
-\begin{equation}\label{eq:cconst}
-	c_k = \frac{\phi_{30,ij}\cdot\delta\boldsymbol{\bar{u}}_k}{6}
+The bracket in the first term is the load-parameter derivative of the tangent
+operator, $\partial \phi_2/\partial\lambda$, so the first term is exactly the
+contraction stored as \texttt{phi20\_a[k]}.  The second term is a constant.
+Equation~\ref{eq:sun33} is written for a single mode, and before it can be
+imposed on $\boldsymbol{\bar{u}}_{ij}$ with distinct indices, or along a
+direction that is not a Koiter mode, the origin of that constant has to be
+identified.  Write $\boldsymbol{L}_2$ for the symmetric bilinear part of the
+strain, so that $\boldsymbol{B}_{NL}(\boldsymbol{a})\,\boldsymbol{b} =
+\boldsymbol{L}_2(\boldsymbol{a},\boldsymbol{b})$.  Equation~\ref{eq:sun33} is
+the second-order part of the functional
+\begin{equation}\label{eq:Tfunctional}
+	\boldsymbol{\sigma}_{,\lambda}\cdot
+	  \boldsymbol{L}_2(\delta\boldsymbol{\bar{u}}_k,\boldsymbol{\bar{u}}_{ij})
+	+ \boldsymbol{\sigma}_k\cdot
+	  \boldsymbol{L}_2(\boldsymbol{\hat{u}}_{,\lambda},\boldsymbol{\bar{u}}_{ij})
+	+ \boldsymbol{\sigma}_{ij}\cdot
+	  \boldsymbol{L}_2(\boldsymbol{\hat{u}}_{,\lambda},\delta\boldsymbol{\bar{u}}_k)
 \end{equation}
 
-\noindent and the condition to impose is
+\noindent in which $\boldsymbol{\sigma}_k$ is the stress of the mode and
+$\boldsymbol{\sigma}_{ij}$ the complete second-order stress,
+\begin{equation}
+	\boldsymbol{\sigma}_{ij} = \boldsymbol{C}\Big[
+	  \frac{\partial\boldsymbol{\varepsilon}}{\partial\boldsymbol{\bar{u}}}
+	  (\boldsymbol{\hat{u}})\,\boldsymbol{\bar{u}}_{ij}
+	  + \frac{1}{2}\,\boldsymbol{L}_2(\delta\boldsymbol{\bar{u}}_i,
+	                               \delta\boldsymbol{\bar{u}}_j)\Big]
+\end{equation}
+
+\noindent the one half following from the expansion
+$\boldsymbol{\bar{u}} = \boldsymbol{\hat{u}}
++ \sum_i\xi_i\,\delta\boldsymbol{\bar{u}}_i
++ \sum_{i,j}\xi_i\xi_j\,\boldsymbol{\bar{u}}_{ij}$ summed over all $i$ and $j$,
+the convention of the right-hand side of Eq.~\ref{eq:secondorder}.  The part
+of Eq.~\ref{eq:Tfunctional} linear in $\boldsymbol{\bar{u}}_{ij}$ is
+$\phi_{20,k}\cdot\boldsymbol{\bar{u}}_{ij}$, and the quadratic part of
+$\boldsymbol{\sigma}_{ij}$ contributes the constant
+\begin{equation}\label{eq:cconst}
+	c_{ij,k} = \frac{1}{2}\,
+	  \boldsymbol{C}\boldsymbol{L}_2(\delta\boldsymbol{\bar{u}}_i,
+	                                 \delta\boldsymbol{\bar{u}}_j)
+	  \cdot\boldsymbol{L}_2(\boldsymbol{\hat{u}}_{,\lambda},
+	                        \delta\boldsymbol{\bar{u}}_k)
+\end{equation}
+
+\noindent which for $i = j = k$ is the second term of Eq.~\ref{eq:sun33}.  The
+condition to impose is
 \begin{equation}\label{eq:condition}
-	\phi_{20,k}\cdot\boldsymbol{\bar{u}}_{ij} = -\,c_k
+	\phi_{20,k}\cdot\boldsymbol{\bar{u}}_{ij} = -\,c_{ij,k}
 \end{equation}
 
 It is weighted by the stiffness matrices, through $\phi_{20}$, and
-inhomogeneous, through $c_k$.  A Gram-Schmidt projection, or equivalently a
-symmetric Euclidean border, imposes neither of these properties and is the
+inhomogeneous, through $c_{ij,k}$.  A Gram-Schmidt projection, or equivalently
+a symmetric Euclidean border, imposes neither of these properties and is the
 procedure that Eq.~\ref{eq:condition} replaces.
+
+The constant is symmetric in $i$ and $j$ but not in $k$.  The load derivative
+of the third variation, assembled as \texttt{phi30\_ab}, is its
+symmetrisation over the three slots,
+\begin{equation}
+	\phi_{30,ij}\cdot\delta\boldsymbol{\bar{u}}_k
+	= 2\,\big(c_{ij,k} + c_{ik,j} + c_{jk,i}\big)
+\end{equation}
+
+\noindent so that $\phi_{30,ij}\cdot\delta\boldsymbol{\bar{u}}_k/6$, which the
+implementation used to take for the constant, is the average of $c$ over its
+slots and equals $c_{ij,k}$ only when the three indices coincide.  It cannot
+be corrected after the fact either: a tensor symmetric in two of its slots
+has more independent components than its fully symmetric part, so the
+constant is assembled from an element integral of its own,
+\texttt{cst\_ab}, whose integrand is one of the six terms of
+\texttt{phi30\_ab}.
+
+Between buckling modes of a cylinder about an axisymmetric pre-buckling state
+every $c_{ij,k}$ vanishes.  $\boldsymbol{L}_2(\delta\boldsymbol{\bar{u}}_i,
+\delta\boldsymbol{\bar{u}}_j)$ carries the circumferential harmonics
+$n_i \pm n_j$ and $\boldsymbol{L}_2(\boldsymbol{\hat{u}}_{,\lambda},
+\delta\boldsymbol{\bar{u}}_k)$ the harmonic $n_k$, and no three members of a
+near-critical cluster satisfy $n_k = n_i \pm n_j$.  That is why neither the
+single-mode results nor the reference cases could tell the two expressions
+apart, and why the test of Section~\ref{sec:ortho-test} makes the modes
+generic.
 
 \subsection{The bordered system}
 
@@ -843,24 +1034,69 @@ Both requirements are met by a \emph{non-symmetric} bordered system:
 \noindent in which the roles of the two borders are distinct.  The
 \emph{column} border $\boldsymbol{N}_{sp}$ spans the null space of $\phi_2$ and
 is what makes the system non-singular; the \emph{row} border $\boldsymbol{W}$
-carries the constraints, one column per Koiter mode, $\boldsymbol{W}[:,k] =
-\phi_{20,k}$, with the corresponding right-hand side $-c_k$ from
-Eq.~\ref{eq:cconst}.  The system is non-singular provided
-$\boldsymbol{W}^\top\boldsymbol{N}_{sp}$ is, and its leading entry
-$\phi_{20,k}\cdot\delta\boldsymbol{\bar{u}}_k$ is exactly the quantity
-appearing in the denominator of the post-buckling coefficients, hence non-zero
-by construction.
+carries the constraints, one column per direction $\boldsymbol{q}_k$ of that
+null space, $\boldsymbol{W}[:,k] = \phi_{20}(\boldsymbol{q}_k)$, with the
+right-hand side $-c_{ij}(\boldsymbol{q}_k)$ of Eq.~\ref{eq:cconst}.  The two
+borders have the same number of columns by construction.  The system is
+non-singular provided $\boldsymbol{W}^\top\boldsymbol{N}_{sp}$ is, and for a
+Koiter mode its diagonal entry $\phi_{20,k}\cdot\delta\boldsymbol{\bar{u}}_k$
+is the quantity in the denominator of the post-buckling coefficients, hence
+non-zero by construction.
 
 Because the critical eigenspace is degenerate, $\boldsymbol{N}_{sp}$ must span
-the \emph{whole} near-null space and not only the retained Koiter modes: every
-eigenvector whose multiplier equals the critical one within a relative
-tolerance is included, and the set is orthonormalised with a rank-revealing
-factorisation.  Equation~\ref{eq:sun33} supplies one condition per Koiter
-mode, which is fewer than the dimension of the null space; the degenerate
-partners lie outside single-mode theory, and the remaining rows of
-$\boldsymbol{W}$ keep the Euclidean condition.  This is a choice, not a
-result; the consistent treatment of a degenerate critical mode is the
-multi-mode Koiter expansion.
+the \emph{whole} null space and not only the retained Koiter modes.  It is
+built from the Koiter modes, from every eigenvector whose multiplier equals
+the critical one within a relative tolerance of $10^{-3}$, and from the
+degenerate partner of each of those eigenvectors whose partner the eigen
+solver did not return, rebuilt through the cyclic shift as in
+Section~\ref{sec:canonical}.  The Koiter modes are orthonormalised first, and
+the rest of the span is taken from a singular value decomposition of what is
+left once they are projected out.  A QR factorisation without pivoting would
+be misled by the duplicate that every Koiter mode has among the eigenvectors,
+giving its round-off a column of its own.
+
+The partner has to be rebuilt more often than not.  On the $n_y = 40$ meshes
+of both reference shells, with the two and four multipliers the tests ask
+for, the eigen solver returns no partner at all: the Arbocz shell gives
+$n = 10$ and then $n = 11$, $0.19\%$ above, and the Sun shell
+$n = 10, 9, 7, 11$.  The column border used to hold the critical mode alone.
+Its partner $\boldsymbol{p}$ is a null vector of $\phi_2$ with
+$\phi_{20,1}\cdot\boldsymbol{p} = 0$, by the orthogonality of the harmonics
+$\cos(n y/R)$ and $\sin(n y/R)$, and so was a null vector of the whole
+bordered matrix, left to the pivoting of the sparse solver.  On the Arbocz
+shell, $n_y = 60$, including it changes $b_{1111}$ by $4\times10^{-7}$
+relative: the partner carries the harmonic $n$ and
+$\boldsymbol{\bar{u}}_{11}$ does not, so $\phi_{3,11}$ never saw what the
+solver left along it.
+
+Condition~\ref{eq:condition} is imposed along \emph{every} direction of the
+null space, the Koiter modes and the rest of it alike, where the rest used to
+carry an Euclidean condition.  An expansion that retains part of a
+degenerate eigenspace gives the rest of it zero amplitude.  The second-order
+field must not bring any amplitude back, as measured by the same functional,
+Eq.~\ref{eq:Tfunctional}, that measures the amplitudes of the retained modes.
+For a single-mode expansion of a cylinder the weighted and the Euclidean
+conditions coincide, the partner carrying the harmonic $n$ and
+$\boldsymbol{\bar{u}}_{11}$ the harmonics $0$ and $2n$; in general they do
+not.
+
+\subsection{Checking the conditions}
+\label{sec:ortho-test}
+
+\texttt{tests/test\_second\_order\_conditions.py} recomputes both terms of
+Eq.~\ref{eq:condition} without the tensors the model assembles.  The first
+comes from a central difference of the tangent of the compiled element along
+$\boldsymbol{\hat{u}}_{,\lambda}$, which is exact because
+$\boldsymbol{K}_{C0} + \boldsymbol{K}_C^{NL}(\boldsymbol{u}) +
+\boldsymbol{K}_G(\boldsymbol{u})$ is quadratic in $\boldsymbol{u}$.  The
+second comes from integrating Eq.~\ref{eq:cconst} with the strain operators
+of the element.  The test checks that the condition holds, for both
+kinematics, for every pair of two Koiter modes and along every direction of
+the null space, the modes having been made generic by a fixed random field
+added to the eigenvectors, since with genuine cylinder modes every constant
+vanishes and the weighted and Euclidean conditions coincide.  A second test
+checks that the rebuilt partner lies in the column border on a mesh where the
+eigen solver does not return it.
 
 \subsection{What the weighted condition does, and does not, change}
 
@@ -1005,9 +1241,62 @@ Sun, $n_y = 50$    & $10$ & $-0.222844$ & --- \\
 \end{tabular}
 \end{center}
 
-The $n_y = 60$ value is within five per cent of the ANILISA coefficient
-for the same mode.  A negative $b$ means an imperfection sensitive shell,
-which is what this one is.
+The $n_y = 60$ value is $5.2$ per cent short of the ANILISA coefficient for
+the same mode, a difference Section~\ref{sec:gap} takes apart.  A negative
+$b$ means an imperfection sensitive shell, which is what this one is.
+
+\subsection{The gap to ANILISA}
+\label{sec:gap}
+
+The difference is not that of a single-mode expansion to a multi-mode one:
+the ANILISA coefficient and that of Sun~Table~2 are single-mode coefficients
+too.  It is taken apart below on the Arbocz shell, von K\'arm\'an kinematics,
+every figure from \texttt{doc/verification/reference\_b\_convergence.py}, and
+every mesh buckling with $n = 11$.
+
+\emph{Normalisation.}  At the $n_y = 60$, $n_x = 25$ mesh of the table above
+the crest of the mode stands $0.2$ per cent above its largest nodal
+translation, which puts $b_{1111}$ at $-0.35498$ rather than $-0.35646$
+(Section~\ref{sec:normalisation}).  All figures below are crest-normalised.
+
+\emph{Axial resolution.}  With $n_y = 60$, $b_{1111}$ is $-0.3574$ within $0.05$
+per cent for every $n_x$ from $37$ to $75$, and $0.7$ per cent short of it at
+$n_x = 25$.  The oscillation with $n_x$ that the nodal normalisation shows is
+not in the coefficient.
+
+\emph{Circumferential resolution.}  At $n_x = 51$, $n_y = 60$, $88$ and $120$
+give $-0.35739$, $-0.36299$ and $-0.36413$.  They sample the harmonic $2n = 22$
+of the second-order field with $2.7$, $4$ and $5.5$ elements per wave, and the
+two differences are those of a fourth-order convergence, which extrapolates to
+$-0.3646$.  Resolving $2n$ is therefore worth $2$ per cent of $b_{1111}$, not
+five.
+
+\emph{Resonance.}  A multiplier of the harmonics $0$ or $2n$ carried by the
+second-order field close to the critical one would amplify that field.  On
+every $n_y = 60$ and $88$ mesh the lowest multiplier of the axisymmetric
+harmonic stands $17$ per cent above the critical one and that of $2n$ $78$ to
+$80$ per cent above it, so there is none.
+
+\emph{Expansion point.}  The expansion is made at $\lambda_b/\lambda_c
+\simeq 0.9968$, the default \texttt{NLprebuck\_eps1}.  On the $n_y = 60$,
+$n_x = 51$ mesh, $\lambda_b/\lambda_c = 0.9991$ moves $b_{1111}$ from $-0.35739$
+to $-0.35434$ and $\lambda_c$ from $0.329244$ to $0.328830$; extrapolated
+linearly to $\lambda_b = \lambda_c$ they become $-0.3532$ and $0.32867$.  The
+buckling load then agrees with the ANILISA value $0.328594$ to $0.02$ per cent,
+while $b_{1111}$ loses another $1.2$ per cent of its magnitude.
+
+\emph{Kinematics.}  The Sanders model on the $n_y = 60$, $n_x = 51$ mesh gives
+$b_{1111} = -0.34915$ and $\lambda_c = 0.328545$, $2.3$ per cent further from
+the ANILISA coefficient, which rests on Donnell-type kinematics.
+
+Together, the converged $-0.3646$ scaled by the expansion point correction
+puts the von K\'arm\'an $b_{1111}$ at about $-0.360$, $4.2$ per cent short of
+ANILISA with the buckling load within $0.02$ per cent.  Of the original
+$5.2$ per cent, the mesh closes $2.7$, the axial resolution $0.7$ of it and
+the harmonic $2n$ $2.0$, while the crest normalisation and the expansion point
+open $0.4$ and $1.2$ again.  What remains is not a property of the mesh, and
+its source, whether in the kinematics of the element against those of ANILISA
+or in the reference computation itself, has not been identified.
 
 \subsection{What the tangent correction changed}
 
@@ -1336,23 +1625,32 @@ harmonic content of the critical mode, never the convergence history.
 %==============================================================================
 
 \begin{enumerate}\itemsep3pt
-  \item \textbf{Degenerate critical modes.}  Condition~\ref{eq:condition}
-        supplies one equation per retained mode while the null space is
-        larger, and the rotation inside the degenerate pair still moves
-        $b_{1111}$ by sixteen per cent on the $n_y = 40$ mesh.  The
-        canonicalisation of Section~\ref{sec:canonical} makes the choice
-        reproducible rather than arbitrary; it does not make it converged.
-        Multi-mode Koiter is the consistent treatment, and
-        Section~\ref{sec:howmany} sizes it: six to eight modes, three to four
-        degenerate pairs, for the reference shells.
+  \item \textbf{Degenerate critical modes.}  The rotation inside the
+        degenerate pair still moves $b_{1111}$ by sixteen per cent on the
+        $n_y = 40$ mesh.  The canonicalisation of
+        Section~\ref{sec:canonical} makes the choice reproducible rather than
+        arbitrary; it does not make it converged.  The bordered system no
+        longer adds to this, its column and row borders spanning the whole
+        null space (Section~\ref{sec:secondorder}).
   \item \textbf{Resolution of the second-order field.}  The second-order field
         carries the harmonic $2n$, which the meshes used here sample with
         about two nodes per wave.  This, and not the expansion itself, is what
         limits $b_{ijkl}$; the buckling load is far less affected.
-  \item \textbf{Symmetrisation of $\phi_{30}$ for distinct modes.}  The
-        identity of Eq.~\ref{eq:cconst} was established for coinciding mode
-        indices, which covers the single-mode case exercised here; the general
-        multi-mode symmetrisation remains to be worked out.
+  \item \textbf{The rest of the multi-mode path.}  The orthogonality
+        conditions, the row border and the right-hand side of the
+        second-order fields are those of the expansion for any number of
+        modes (Section~\ref{sec:secondorder}), and
+        Section~\ref{sec:ortho-test} checks that they are imposed.  What has
+        not been checked is $b_{ijkl}$ itself.  Its terms in $a_{ijk}$ are
+        the single-mode substitution $\lambda - \lambda_c = \lambda_c a\xi$
+        written with indices, and $a_{ijk}$ is normalised by $T_{ii}$ alone,
+        which presumes modes orthogonal with respect to $T$; for modes that
+        are not, the amplitude equations are coupled through $T$ already in
+        their linear term.  On a cylinder $a_{ijk}$ vanishes, and $T$
+        vanishes between modes of different circumferential wave numbers and
+        inside a degenerate pair, so neither point affects the reference
+        cases; both would matter for an asymmetric bifurcation, and the
+        second also for two retained modes with the same wave number.
   \item \textbf{Axisymmetric critical modes.}  The reduction of the
         pre-buckling problem to the axisymmetric subspace
         (Section~\ref{sec:axisymmetric}) assumes that no buckling mode lies
@@ -1430,6 +1728,10 @@ script & produces & runtime \\
   & table of Section~\ref{sec:cts-spectrum} & $\sim$20~min \\
 \texttt{reference\_mode\_cluster.py}
   & table of Section~\ref{sec:howmany} & $\sim$5~min \\
+\texttt{second\_order\_rhs.py}
+  & Section~\ref{sec:secondorder} & seconds \\
+\texttt{reference\_b\_convergence.py}
+  & Sections~\ref{sec:canonical} and \ref{sec:gap} & 2--25~min per run \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1476,6 +1778,9 @@ test & shell & reference \\
 \texttt{test\_buckling\_mode\_cluster.py}
   & Sun~\S3.1
   & Section~\ref{sec:howmany} \\
+\texttt{test\_second\_order\_conditions.py}
+  & Sun~\S3.1, coarse
+  & Section~\ref{sec:ortho-test} \\
 \texttt{test\_linBuck\_VAFW.py}
   & VAFW cylinders
   & linear buckling \\
