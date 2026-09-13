@@ -17,7 +17,8 @@ from bfsccylinder.sanders import (BFSCCylinderSanders, update_KC0, update_KCNL,
 from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
-        axisymmetric_basis, project_axisymmetric, canonical_modes)
+        axisymmetric_basis, project_axisymmetric, canonical_modes,
+        degenerate_partner)
 
 num_nodes = 4
 
@@ -565,24 +566,82 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         ua[modei] /= ampl
         ua[modei] *= havg
 
+    #NOTE the null space of phi2, against which the second order fields are
+    #     constrained, see the bordered system below. The buckling modes of a
+    #     cylinder come in degenerate pairs, one for each sign of the
+    #     circumferential wave number, so it is spanned by every eigenvector
+    #     whose multiplier equals the critical one AND by the partner of each
+    #     of them, and not only by the Koiter modes.
+    #
+    #     The partner need not be among the eigenvectors. A Krylov method
+    #     finds one direction of a degenerate eigenspace and moves on to the
+    #     next multiplier, and on the meshes of the test suite asking for two
+    #     to four multipliers returns no partner at all. Left out of the
+    #     column border, the partner is a null vector of the whole bordered
+    #     matrix, the row of the critical mode being blind to it by symmetry,
+    #     so it is rebuilt from the cyclic symmetry, as canonical_modes does,
+    #     whenever the eigen solver did not return it
+    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
+    for j in range(num_eigvals):
+        if abs(mu[j] - mu[0]) > 1.e-3*abs(mu[0]):
+            continue
+        cols.append(eigvecsu[:, j])
+        group = [k for k in range(num_eigvals)
+                 if abs(mu[k] - mu[j]) <= 1.e-5*abs(mu[j])]
+        if len(group) == 1:
+            partner = degenerate_partner(eigvecs[:, j], bu, axi_order, DOF)
+            if partner is not None:
+                cols.append(partner[bu])
+    #NOTE the Koiter modes first, then what the other vectors add to them.
+    #     Every eigenvector that is also a Koiter mode is in cols twice, and a
+    #     QR factorization without pivoting would give the round off left of
+    #     the duplicate a column of its own and project the next vector
+    #     against it, so the complement is taken from an SVD instead
+    C = np.asarray(cols).T
+    C = C/np.linalg.norm(C, axis=0)
+    Qm, Rm = np.linalg.qr(C[:, :koiter_num_modes])
+    assert np.abs(np.diag(Rm)).min() > 1.e-6, 'linearly dependent Koiter modes'
+    for _ in range(2):
+        C = C - Qm @ (Qm.T @ C)
+    Uc, sc = np.linalg.svd(C, full_matrices=False)[:2]
+    Nsp = np.hstack((Qm, Uc[:, sc > 1.e-8]))
+    print('# null space of phi2 deflated with %d vectors' % Nsp.shape[1])
+
+    #NOTE the directions along which the orthogonality conditions are
+    #     imposed, one per column of Nsp and spanning the same space: the
+    #     Koiter modes, then the rest of the null space
+    ucond = {}
+    for modek in range(koiter_num_modes):
+        ucond[modek] = ua[modek]
+    for col in range(koiter_num_modes, Nsp.shape[1]):
+        v = np.zeros(N)
+        v[bu] = Nsp[:, col]
+        ucond[col] = v
+    num_cond = len(ucond)
+
     phi4 = defaultdict(lambda: 0)
     phi3_ab = {}
     phi30_ab = {}
+    cst_ab = {}
     phi3e_ab = {}
     phi30e_ab = {}
+    cste_ab = {}
     phi20e_a = {}
     phi20_a = {}
     #phi2 = np.zeros((N, N))
     phi200_ab = {}
-    for modei in range(koiter_num_modes):
+    for modei in range(num_cond):
         phi20_a[modei] = np.zeros(N)
         phi20e_a[modei] = np.zeros(num_nodes*DOF)
+    for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             phi200_ab[(modei, modej)] = 0
             phi3_ab[(modei, modej)] = np.zeros(N)
             phi30_ab[(modei, modej)] = np.zeros(N)
+            cst_ab[(modei, modej)] = np.zeros(N)
             phi3e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
             phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
+            cste_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
 
 
     #NOTE this flag multiplies every nonlinear contribution to the
@@ -628,14 +687,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             u0ddote[2*DOF + i] = u0ddot[c3 + i]
             u0ddote[3*DOF + i] = u0ddot[c4 + i]
 
+        #NOTE the Koiter modes, followed by the remaining directions of the
+        #     null space of phi2, for which only phi20_a is needed
         uae = {}
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             uae[modei] = np.zeros(num_nodes*DOF, dtype=np.float64)
             for i in range(DOF):
-                uae[modei][0*DOF + i] = ua[modei][c1 + i]
-                uae[modei][1*DOF + i] = ua[modei][c2 + i]
-                uae[modei][2*DOF + i] = ua[modei][c3 + i]
-                uae[modei][3*DOF + i] = ua[modei][c4 + i]
+                uae[modei][0*DOF + i] = ucond[modei][c1 + i]
+                uae[modei][1*DOF + i] = ucond[modei][c2 + i]
+                uae[modei][2*DOF + i] = ucond[modei][c3 + i]
+                uae[modei][3*DOF + i] = ucond[modei][c4 + i]
 
         ube = uce = ude = uae
 
@@ -648,11 +709,13 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         lex = elem.lex
         ley = elem.ley
 
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             phi20e_a[modei] *= 0
+        for modei in range(koiter_num_modes):
             for modej in range(koiter_num_modes):
                 phi3e_ab[(modei, modej)] *= 0
                 phi30e_ab[(modei, modej)] *= 0
+                cste_ab[(modei, modej)] *= 0
 
         #phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
 
@@ -756,7 +819,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                            #+ es('ib,ia->ab', Mib, kia)
                         #)
 
-                for modei in range(koiter_num_modes):
+                for modei in range(num_cond):
                     ua1 = uae[modei]
                     phi20e_a[modei] += 1/2.*weight*(lex*ley/4.)*(
                             (ei0 @ (Niab @ ua1))
@@ -799,6 +862,15 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                             + es('ib,iac,a,b', Nib0, eiac, ua1, ub2)
                             + es('ic,iab,a,b', Nic0, eiab, ua1, ub2)
                             )
+                        #NOTE 1/2 <N[L2(ua, ub)], L11(u0_dot, .)>, the
+                        #     constant of the orthogonality condition, see the
+                        #     bordered system below. Its integrand is the
+                        #     first, and the last, of the six terms of
+                        #     phi30e_ab, which as a whole is symmetric in all
+                        #     three slots while this is symmetric in a and b
+                        #     only
+                        cste_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
+                              es('iab,ic,a,b', Niab, eic0, ua1, ub2))
 
                 def fphi4(ua, ub, uc, ud):
                     return 1/2.*weight*(lex*ley/4.)*(
@@ -819,11 +891,13 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         #tmp = np.zeros((N, num_nodes*DOF))
         #tmp[indices] = phi2e
         #phi2[:, indices] += tmp
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             phi20_a[modei][indices] += phi20e_a[modei]
+        for modei in range(koiter_num_modes):
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
+                cst_ab[(modei, modej)][indices] += cste_ab[(modei, modej)]
 
     #NOTE phi2 must be the SAME operator whose null vector is the buckling
     #     mode, so it is built from the KC and KG of the eigenvalue analysis,
@@ -885,36 +959,34 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     with mode k on one slot, which is exactly phi20_a[k], and the second
     #     is a constant, so the condition is weighted by the stiffness
     #     matrices and inhomogeneous. A Gram-Schmidt projection, or an
-    #     Euclidean border Q^T uab = 0, imposes neither
+    #     Euclidean border Q^T uab = 0, imposes neither.
+    #
+    #     Eq. (33) is written for one mode. Its constant is the contribution
+    #     of the quadratic part of the second order stress,
+    #         sigma_ab = H [L1(uab) + L11(u0, uab) + 1/2 L2(ua, ub)],
+    #     to the functional
+    #         sigma0_dot.L11(q_k, uab) + sigma_k.L11(u0_dot, uab)
+    #             + sigma_ab.L11(u0_dot, q_k)
+    #     whose other terms add up to phi20_a[k] @ uab. With distinct indices
+    #     it is therefore
+    #         1/2 <N[L2(ua, ub)], L11(u0_dot, q_k)> = cst_ab[(a, b)] @ q_k
+    #     which is symmetric in a and b but not in k. phi30_ab @ q_k/6 is the
+    #     average of that over the three slots, and equals it only when a, b
+    #     and k coincide, which is the case Eq. (33) covers.
+    #
+    #     The condition is imposed along every direction of the null space of
+    #     phi2, and not only along the Koiter modes. An expansion that retains
+    #     part of a degenerate eigenspace gives the rest of it zero amplitude,
+    #     and the second order field must not bring any back, as measured by
+    #     that same functional, so the directions outside the retained modes
+    #     get the weighted, inhomogeneous condition rather than an Euclidean
+    #     one. For a single mode expansion of a cylinder the two coincide, the
+    #     harmonic content of the partner being disjoint from that of uab;
+    #     that is a property of the cylinder, not of the expansion
     nu = int(bu.sum())
-
-    #NOTE the buckling modes of a cylinder come in degenerate pairs, one for
-    #     each sign of the circumferential wave number, so the null space of
-    #     phi2 is spanned by every eigenvector whose multiplier equals the
-    #     critical one, not only by the Koiter modes
-    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
-    for j in range(num_eigvals):
-        if abs(mu[j] - mu[0]) <= 1.e-3*abs(mu[0]):
-            cols.append(eigvecsu[:, j])
-    Qo, r = np.linalg.qr(np.asarray(cols).T)
-    keep = np.abs(np.diag(r)) > 1.e-10*np.abs(np.diag(r)).max()
-    Nsp = Qo[:, keep]
-    print('# null space of phi2 deflated with %d vectors' % Nsp.shape[1])
-
-    #NOTE one row of Eq. (33) per Koiter mode. Whatever is left of the null
-    #     space, the degenerate partners of those modes, is outside the single
-    #     mode theory and keeps the Euclidean condition
-    W = np.zeros_like(Nsp)
-    for modek in range(koiter_num_modes):
+    W = np.zeros((nu, num_cond))
+    for modek in range(num_cond):
         W[:, modek] = phi20_a[modek][bu]
-    extra = Nsp.shape[1] - koiter_num_modes
-    if extra > 0:
-        P = Nsp.copy()
-        for modek in range(koiter_num_modes):
-            v = ua[modek][bu]
-            P = P - np.outer(v, v @ P)/(v @ v)
-        W[:, koiter_num_modes:] = np.linalg.svd(
-                P, full_matrices=False)[0][:, :extra]
 
     bordered = bmat([[phi2uu, csc_matrix(Nsp)],
                      [csc_matrix(W).T, None]], format='csc')
@@ -922,21 +994,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
-            rhs = np.zeros(nu + Nsp.shape[1])
+            rhs = np.zeros(nu + num_cond)
             rhs[:nu] = force2ndorder_ij[(modei, modej)][bu]
-            for modek in range(koiter_num_modes):
-                #NOTE the constant of Eq. (33). With every mode index equal,
-                #     the six contributions summed into phi30_ab coincide, so
-                #     that with the 1/2 carried by the quadrature weight
-                #     phi30_ab @ ua is three times
-                #     <N[L2(u1)], L11(u0_dot, u1)>, and Eq. (33) takes one
-                #     half of it
-                #TODO for koiter_num_modes > 1 the symmetrization of phi30
-                #     over distinct modes still has to be worked out, the
-                #     expression below is only exact when modei, modej and
-                #     modek coincide
-                rhs[nu + modek] = -(phi30_ab[(modei, modej)]
-                        @ ua[modek])/6.
+            for modek in range(num_cond):
+                rhs[nu + modek] = -(cst_ab[(modei, modej)] @ ucond[modek])
             sol = spsolve(bordered, rhs)
             uijbar = np.zeros(N)
             uijbar[bu] = sol[:nu]
@@ -976,6 +1037,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         u0=u0,
         ui=ua,
         uij=uab,
+        u0dot=u0dot,
+        ucond=ucond,
             )
     out['koiter'] = koiter
 

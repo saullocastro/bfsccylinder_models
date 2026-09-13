@@ -108,6 +108,58 @@ def rotated(u, axi_order, DOF, shift=1):
     return rot.reshape(-1)
 
 
+def degenerate_partner(phi, bu, axi_order, DOF):
+    """The other member of the degenerate pair of the mode phi
+
+    Built from the rotation of phi by one element, :func:`rotated`, the
+    cyclic symmetry of the mesh making it another mode of the same pair,
+    orthogonalized against phi and scaled to its norm.
+
+    Returns None when there is no partner to build: an axisymmetric mode is
+    its own rotation, and so, up to the sign, is the mode with ny/2
+    circumferential waves; and a rotation that leaves anything on a
+    constrained degree of freedom other than the axial translation cannot be
+    brought back into the admissible space without leaving the eigenspace.
+
+    Parameters
+    ----------
+    phi : array-like
+        The mode, over every degree of freedom.
+    bu : array-like
+        Boolean mask of the unknown degrees of freedom.
+    axi_order : array-like
+        Node positions on the mesh, from :func:`mesh_order`.
+    DOF : int
+        Degrees of freedom per node.
+
+    """
+    phi = np.asarray(phi, dtype=np.float64)
+    phi_norm = np.sqrt(phi @ phi)
+    psi = rotated(phi, axi_order, DOF)
+    #NOTE the constraint that suppresses the axial translation sits on a
+    #     single node and is not itself symmetric, so the rotated mode does
+    #     not satisfy it. An axial rigid body translation carries no strain
+    #     and is annihilated by both stiffness matrices, so subtracting one
+    #     restores the constraint without taking the mode out of its
+    #     eigenspace. Truncating the offending degree of freedom instead does
+    #     take it out, and since the operator of the second order field is
+    #     singular along the mode, the error is then amplified without bound
+    u_dofs = np.arange(0, bu.shape[0], DOF)
+    pinned = u_dofs[~bu[u_dofs]]
+    if pinned.size:
+        psi[u_dofs] -= psi[pinned].mean()
+    #NOTE anything the rotation still leaves on a constrained degree of
+    #     freedom would have to be truncated, and the result would no longer
+    #     be a mode
+    if np.abs(psi[~bu]).max(initial=0.) > 1.e-10*np.abs(psi).max():
+        return None
+    psi -= (psi @ phi)/(phi @ phi)*phi
+    psi_norm = np.sqrt(psi @ psi)
+    if psi_norm <= 1.e-8*phi_norm:
+        return None
+    return psi*(phi_norm/psi_norm)
+
+
 def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     """Fix the rotation left free inside each degenerate group of modes
 
@@ -178,38 +230,16 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
         i1 = grp[1] if len(grp) == 2 else None
         phi = np.zeros(bu.shape[0], dtype=np.float64)
         phi[bu] = eigvecsu[:, i0]
-        phi_norm = np.sqrt(phi @ phi)
         if i1 is not None:
             psi = np.zeros(bu.shape[0], dtype=np.float64)
             psi[bu] = eigvecsu[:, i1]
         else:
-            psi = rotated(phi, axi_order, DOF)
-            #NOTE the constraint that suppresses the axial translation sits on
-            #     a single node and is not itself symmetric, so the rotated
-            #     mode does not satisfy it. An axial rigid body translation
-            #     carries no strain and is annihilated by both stiffness
-            #     matrices, so subtracting one restores the constraint without
-            #     taking the mode out of its eigenspace. Truncating the
-            #     offending degree of freedom instead does take it out, and
-            #     since the operator of the second order field is singular
-            #     along the mode, the error is then amplified without bound
-            u_dofs = np.arange(0, bu.shape[0], DOF)
-            pinned = u_dofs[~bu[u_dofs]]
-            if pinned.size:
-                psi[u_dofs] -= psi[pinned].mean()
-            #NOTE anything the rotation still leaves on a constrained degree
-            #     of freedom would have to be truncated, so the pair is left
-            #     alone rather than canonicalized with a corrupted partner
-            if np.abs(psi[~bu]).max(initial=0.) > 1.e-10*np.abs(psi).max():
+            psi = degenerate_partner(phi, bu, axi_order, DOF)
+            #NOTE no partner, or none that could be kept admissible, so the
+            #     mode is left alone rather than canonicalized with a
+            #     corrupted one
+            if psi is None:
                 continue
-            psi -= (psi @ phi)/(phi @ phi)*phi
-            psi_norm = np.sqrt(psi @ psi)
-            #NOTE an axisymmetric mode is its own rotation and has no partner,
-            #     and so has the mode with ny/2 circumferential waves, whose
-            #     rotation by one element is minus itself
-            if psi_norm <= 1.e-8*phi_norm:
-                continue
-            psi *= phi_norm/psi_norm
         #NOTE of the two members of a pair one has a crest on the generator
         #     and the other a node, so the dominant eigenvector of the 2 by 2
         #     Gram matrix of their traces there is well separated
