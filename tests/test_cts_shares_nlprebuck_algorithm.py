@@ -27,6 +27,8 @@ PKG = os.path.join(HERE, os.pardir, 'bfsccylinder_models')
 REGIONS = [
     ('    def assemble_KG(u):', '    Pcr = load_mult[0]*Nxxunit*circ'),
     ('    #NOTE this flag multiplies', '    flag = NLprebuck'),
+    ('    #NOTE the null space of phi2, against which',
+     '    num_cond = len(ucond)'),
     ('    #NOTE phi2 must be the SAME operator', '    phi2uu = KCuu + KGuu*mu[0]'),
     ('    #NOTE phi2 is singular by construction',
      '            uab[(modei, modej)] = uijbar'),
