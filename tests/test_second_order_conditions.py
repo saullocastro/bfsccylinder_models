@@ -190,8 +190,35 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     model, lib, element, sanders = KINEMATICS[kinematics]
     monkeypatch.setattr(model, 'canonical_modes',
                         _generic(model.canonical_modes))
+    solves = []
+    spsolve = model.spsolve
+
+    def capture(A, b):
+        solves.append((A.tocsr(), np.array(b, copy=True)))
+        return spsolve(A, b)
+
+    monkeypatch.setattr(model, 'spsolve', capture)
     out = _run(model, ny=24, num_eigvals=2, koiter_num_modes=2)
     koiter = out['koiter']
+    m = koiter['koiter_num_modes']
+    bu = _unknown_dofs(out)
+    nu = int(bu.sum())
+
+    #NOTE the right hand side of every second order field is orthogonal to
+    #     the Koiter modes, which is what the amplitude equations make it,
+    #     with modes that are not orthogonal with respect to
+    #     T_kl = phi20_k . u_l, the case in which lambda_l a_lij in place of
+    #     the solution of T z = -1/2 phi3_ij . u_k would not do. The bordered
+    #     solves are the last m*m of the model
+    U = np.column_stack([koiter['ui'][k][bu] for k in range(m)])
+    A, _ = solves[-1]
+    W = A[nu:nu + m, :nu].toarray()
+    T = W @ U
+    assert abs(T[0, 1]) > 1e-3*np.sqrt(abs(T[0, 0]*T[1, 1]))
+    for A, b in solves[-m*m:]:
+        assert A.shape[0] == nu + len(koiter['ucond'])
+        g = b[:nu]
+        assert np.abs(U.T @ g).max() <= 1e-9*np.linalg.norm(U, axis=0).max()*np.linalg.norm(g)
     #NOTE more directions than Koiter modes, so that the rows beyond the
     #     Koiter modes, which used to carry an Euclidean condition, are checked
     assert len(koiter['ucond']) > koiter['koiter_num_modes']

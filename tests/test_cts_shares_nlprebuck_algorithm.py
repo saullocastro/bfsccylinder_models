@@ -30,6 +30,8 @@ REGIONS = [
     ('    #NOTE the null space of phi2, against which',
      '    num_cond = len(ucond)'),
     ('    #NOTE phi2 must be the SAME operator', '    phi2uu = KCuu + KGuu*mu[0]'),
+    ('    #NOTE the second order fields solve the terms of order',
+     '                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]'),
     ('    #NOTE phi2 is singular by construction',
      '            uab[(modei, modej)] = uijbar'),
     ('                #NOTE the pre-buckling STATE', '                Nia0 = Nib0 = Nic0'),

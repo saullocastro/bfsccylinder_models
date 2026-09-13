@@ -1126,22 +1126,44 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
                 print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
+    #NOTE the second order fields solve the terms of order xi_a xi_b of the
+    #     equilibrium equations,
+    #         phi2 uab + 1/2 phi3_ab + sum_l z_l phi20_a[l] = 0
+    #     in which z_l is the coefficient of xi_a xi_b in
+    #     (lambda - lambda_l) xi_l, the load term of mode l. The same terms
+    #     projected onto the Koiter modes, along which phi2 vanishes, are the
+    #     amplitude equations that give it,
+    #         sum_l Tkl[k, l] z_l = -1/2 phi3_ab @ ua[k]
+    #     with Tkl[k, l] = phi20_a[k] @ ua[l], so that the right hand side
+    #         -1/2 phi3_ab - sum_l z_l phi20_a[l]
+    #     is orthogonal to every Koiter mode, which is what makes the
+    #     equation solvable with a right hand side that the column border of
+    #     the bordered system below does not have to correct.
+    #
+    #     For modes orthogonal with respect to Tkl, z_l = lambda_l a_lab,
+    #     the substitution lambda - lambda_c = lambda_c a xi of the single
+    #     mode expansion. The factor 1/koiter_num_modes that term used to
+    #     carry left the right hand side orthogonal to the modes for a single
+    #     mode only, and the column border then absorbed the remainder along
+    #     the modes themselves rather than along phi20_a, which is not the
+    #     same field.
+    #
+    #     For the symmetric bifurcation of a cylinder under axial compression
+    #     phi3_ab @ ua[k] vanishes to within round off, a_ijk being of the
+    #     order of 1e-5 against a b_ijkl of order 1, so this changes nothing
+    #     here; it matters only for an asymmetric bifurcation
+    Tkl = np.array([[phi20_a[modek] @ ua[model]
+                     for model in range(koiter_num_modes)]
+                    for modek in range(koiter_num_modes)])
     force2ndorder_ij = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             #NOTE phi3_ij = phi3_ji even in the asym case
             force2ndorder_ij[(modei, modej)] = -1/2.*phi3_ab[(modei, modej)]
-            #NOTE the a_ijk contribution below is kept. For the symmetric
-            #     bifurcation of a cylinder under axial compression a_ijk is
-            #     zero to within round off, of the order of 1e-5 against a
-            #     b_ijkl of order 1, so it changes nothing here; it matters
-            #     only for an asymmetric bifurcation
-            for modek in range(koiter_num_modes):
-                lambda_k = lambda_a[modek]
-                a_kij = a_abc[(modek, modei, modej)]
-                force2ndorder_ij[(modei, modej)] += (
-                        - (1/koiter_num_modes)*a_kij*lambda_k*phi20_a[modek]
-                        )
+            z = np.linalg.solve(Tkl, [-1/2.*(phi3_ab[(modei, modej)] @ ua[modek])
+                                      for modek in range(koiter_num_modes)])
+            for model in range(koiter_num_modes):
+                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]
 
     #NOTE phi2 is singular by construction, the buckling modes span its null
     #     space, so the second order fields cannot be obtained from a plain
