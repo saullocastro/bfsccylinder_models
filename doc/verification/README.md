@@ -37,6 +37,8 @@ these checks measure.
 | `cts_mesh_convergence.py` | mesh convergence of `Pcr` and `b_1111` for a steered design; pass `nl` for the non-linear pre-buckling variant | ~12 min / ~35 min |
 | `cts_mode_spectrum.py` | circumferential harmonic content of the lowest modes against mesh; pass `nl` for non-linear pre-buckling | ~20 min |
 | `reference_mode_cluster.py` | size of the near-critical cluster of the Sun and Arbocz shells, which is what sizes a multi-mode expansion | ~5 min |
+| `second_order_rhs.py` | the right-hand side of the second-order fields that makes a multi-mode expansion consistent: the residual along a post-buckling ray of a two-mode polynomial energy is O(s^3) with the `T^-1` form and O(s^2) with the old `1/m` factor; pass `orthogonal` for T-orthogonal modes | seconds |
+| `reference_b_convergence.py` | single-mode `b_1111` of AW-CYL-1-1 against `ny`, `nx`, the expansion point and the member of the degenerate pair; the crest-normalized `b`, and the lowest multiplier of every circumferential harmonic | 2–25 min per configuration |
 
 ## Literature verification cases
 
@@ -48,5 +50,6 @@ These live in `tests/` because they assert rather than report:
 | `test_koiter_cylinder_Waters.py`, `_sanders.py` | Waters shell | Arbocz & Starnes 2002 |
 | `test_koiter_cylinder_CTS.py`, `_sanders.py` | CTS cylinder, constant-stiffness limit | cross-check against the `newton_raphson` models |
 | `test_buckling_mode_cluster.py` | Sun et al. §3.1 | degeneracy and cluster structure |
+| `test_second_order_conditions.py` | Sun et al. §3.1, coarse | the orthogonality conditions of the bordered system hold along every direction of the null space, against a central difference of the compiled tangent; the rebuilt degenerate partner is in the column border |
 | `test_linBuck_VAFW.py`, `test_Zhihua_error.py` | VAFW cylinders | linear buckling |
 | `test_cts_shares_nlprebuck_algorithm.py` | — | source parity between the CTS and `newton_raphson` models |

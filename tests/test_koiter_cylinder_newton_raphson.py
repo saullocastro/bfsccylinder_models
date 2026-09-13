@@ -76,9 +76,16 @@ def test_Sun_et_al():
     #     about: rotating the critical mode by 30 degrees inside its own
     #     eigenspace, which leaves the pre-buckling state and the buckling
     #     load untouched to eleven digits, moves it to -0.192752, 16% away.
-    #     The second order field of a mode with n circumferential waves
-    #     carries the harmonic 2n, which this mesh samples with two nodes per
-    #     wave, and that is what the residual dependence measures.
+    #     That is almost entirely the normalization of the mode by its
+    #     largest nodal translation, and not the resolution of the harmonic
+    #     2n: the mode is skewed, and the radial crest of the canonical member
+    #     stands 22% above its largest nodal translation on this mesh, 8%
+    #     missed around the circumference and the rest between axial
+    #     stations 36 mm apart. Normalized by the crest amplitude the two
+    #     members give -0.15456 and -0.15022, 2.9% apart, a dependence the
+    #     discrete symmetry allows only because 4n is a multiple of ny here
+    #     (see canonical_modes). The value below is for the nodal
+    #     normalization the models use
     #     canonical_modes fixes the choice to the mesh aligned member, which
     #     is what makes the value below reproducible: 9e-9 between a single
     #     threaded and a multi threaded run
@@ -158,6 +165,18 @@ def test_Arbocz_Starnes_2002():
     #     ny=60 buckles with n=11 and gives -0.356457, 5% from the ANILISA
     #     value for that mode.
     #
+    #     That 5% is not the single-mode truncation, the ANILISA and Sun et al.
+    #     coefficients being single-mode ones too. Taken apart in the
+    #     implementation note, section "The gap to ANILISA": normalized by the
+    #     radial crest, as the reference coefficients are, instead of the
+    #     largest nodal translation, b settles in nx from nx=37 (the nx
+    #     dependence at the nodes is the crest falling between axial
+    #     stations), converges in ny as the harmonic 2n gets resolved, to
+    #     about -0.3646 from ny = 60, 88, 120, and moves to about -0.360 at
+    #     the bifurcation point itself, where lambda_c = 0.32867 agrees with
+    #     ANILISA to 0.02%. About 4% of b remains unexplained by the mesh, the
+    #     normalization and the expansion point
+    #
     #     A negative b is an imperfection sensitive shell, which is what this
     #     one is. It used to come out POSITIVE here, +0.410664, and the sign
     #     was put down to a single mode expansion about a degenerate critical
@@ -180,7 +199,16 @@ def test_Arbocz_Starnes_2002():
     #     component of uab they disagree on is small to begin with. b_ijkl
     #     sees uab through phi3_ab @ uab, whose contraction with the buckling
     #     modes is the numerator of a_ijk, and a_ijk vanishes for this
-    #     symmetric bifurcation. Not re-measured since
+    #     symmetric bifurcation.
+    #
+    #     The eigen solver returns no degenerate partner of the critical mode
+    #     on this mesh, so the column border of the bordered system used to
+    #     miss it, and it was a null vector of the whole bordered matrix. The
+    #     partner is now rebuilt and constrained by the weighted condition
+    #     too; on the ny=60 mesh that changes b_1111 by 4e-7 relative. For a
+    #     single mode of a cylinder the weighted and the Euclidean conditions
+    #     along the partner coincide, its harmonic n being disjoint from the
+    #     harmonics 0 and 2n of uab
     assert np.isclose(b_1111, -0.335975, rtol=0.05)
 
 if __name__ == '__main__':
