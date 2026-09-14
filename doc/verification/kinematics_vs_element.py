@@ -17,7 +17,12 @@ so rebuilding both from the Python side and comparing against update_fint and
 update_KG tests the assumed kinematics against the element, independently of
 anything in bfsccylinder_models.
 
-Reported in: Section "Consistency of the operators".
+It also checks that w along an element edge is the cubic Hermite
+interpolation of w and w,x at its two nodes, which reference_b_convergence.py
+relies on to find the crest of a mode between two axial stations.
+
+Reported in: Sections "Consistency of the operators" and "Normalising the
+modes".
 Runtime: seconds.
 """
 
@@ -136,3 +141,30 @@ r2 = check('Sanders', sa, sa.BFSCCylinderSanders, sanders=True)
 print('\ncontrol: Sanders element with von Karman kinematics (G2 = Sw_y),')
 print('i.e. what a MISSING -Sv/R would give')
 r3 = check('sa w/ vK', sa, sa.BFSCCylinderSanders, sanders=False)
+
+
+def hermite(name, mod, cls):
+    """w along the edge eta = -1 of the element against the cubic Hermite
+    interpolation of w and w,x at its two nodes, degrees of freedom 6 and 7,
+    which is how reference_b_convergence.py follows the crest of a mode
+    between two axial stations"""
+    elem = build(mod, cls)
+    q = rng.standard_normal(num_nodes*DOF)
+    w_elem, w_herm = [], []
+    for xi in np.linspace(-1., 1., 41):
+        elem.update_Sw(xi, -1.)
+        w_elem.append(np.atleast_2d(elem.Sw)[0] @ q)
+        t = (xi + 1.)/2.
+        w_herm.append((2*t**3 - 3*t**2 + 1)*q[6]
+                      + (t**3 - 2*t**2 + t)*lex*q[7]
+                      + (-2*t**3 + 3*t**2)*q[DOF + 6]
+                      + (t**3 - t**2)*lex*q[DOF + 7])
+    w_elem, w_herm = np.array(w_elem), np.array(w_herm)
+    rel = np.abs(w_elem - w_herm).max()/np.abs(w_elem).max()
+    print('%-11s w on an edge, element vs Hermite  rel %.3e' % (name, rel))
+
+
+print('\nw between two axial stations, element against the Hermite interpolation')
+print('used to find the crest of a mode:\n')
+hermite('von Karman', vk, vk.BFSCCylinder)
+hermite('Sanders', sa, sa.BFSCCylinderSanders)

@@ -8,7 +8,7 @@ second-order field carries, and b_1111.
 Reported in: Table of Section "Measured convergence" (no argument) and
 the table of Section "The same design with a non-linear pre-buckling
 state" (argument "nl").
-Runtime: about 12 minutes linear, about 35 minutes non-linear.
+Runtime: about 20 minutes linear, about 35 minutes non-linear.
 """
 
 import os
@@ -72,23 +72,27 @@ for ny, nxt in MESHES:
     nx, ny_out = out['nx'], out['ny']
     DOF = 10
     w = out['eigvecs'][:, 0].reshape(nx, ny_out, DOF)[:, :, 6]
-    imax = np.argmax(np.abs(w).max(axis=1))
-    spec = np.abs(np.fft.rfft(w[imax]))
-    n_circ = int(np.argmax(spec[1:]) + 1)
+    #NOTE energy per circumferential harmonic summed over the axial stations,
+    #     harmonic 0 included: the critical mode of the linear analysis of this
+    #     design is axisymmetric
+    P = (np.abs(np.fft.rfft(w, axis=1))**2).sum(axis=0)
+    n_circ = int(np.argmax(P))
 
     # axial half-waves of the critical mode, along the generator of max crest
+    imax = np.argmax(np.abs(w).max(axis=1))
     jmax = np.argmax(np.abs(w[imax]))
     col = w[:, jmax]
     m_ax = int(np.argmax(np.abs(np.fft.rfft(col))[1:]) + 1)
 
     rows.append(dict(ny=ny_out, nx=nx, dof=DOF*nx*ny_out, n=n_circ, m=m_ax,
-                     per2n=ny_out/(2.*n_circ), dx=L/(nx - 1),
+                     per2n=ny_out/(2.*n_circ) if n_circ else np.inf,
+                     dx=L/(nx - 1),
                      dy=circ/ny_out, Pcr=out['Pcr'],
                      b=out['koiter']['b_ijkl'][(0, 0, 0, 0)],
                      lb=out['lambda_b'], mu=out['mu'][0], dt=dt))
     r = rows[-1]
     print('ROW ny %3d  nx %3d  DOF %7d  dx %.2fmm dy %.2fmm ar %.2f | '
-          'n %2d  m %2d  nodes/2n-wave %.2f | Pcr %11.2f  b_1111 %10.5f | '
+          'n %2d  m %2d  nodes/2n-wave %.2f | Pcr %11.2f  b_1111 %10.3e | '
           '%.0fs' % (r['ny'], r['nx'], r['dof'], 1e3*r['dx'], 1e3*r['dy'],
                      r['dy']/r['dx'], r['n'], r['m'], r['per2n'], r['Pcr'],
                      r['b'], r['dt']))
