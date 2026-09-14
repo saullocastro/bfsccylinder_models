@@ -20,11 +20,15 @@ Runtime: from 2 min (ny=60, nx=25) to 25 min (ny=120, nx=51) per run on an
 unloaded machine. Every run is independent, so the configurations are given
 on the command line and can be run in parallel:
 
-    python reference_b_convergence.py NY NX [EPS1] [ROT_DEG] [sun]
+    python reference_b_convergence.py NY NX [EPS1] [ROT_DEG] [sanders | sun]
+                                      [linear]
 
 EPS1 is NLprebuck_eps1, 0.005 by default; ROT_DEG rotates the critical mode
-inside its pair; 'sun' selects the Sun et al. 3.1 shell with Sanders
-kinematics, as in the test suite, instead.
+inside its pair; 'sanders' keeps AW-CYL-1-1 and its load but replaces the
+von Karman kinematics by the Sanders ones; 'sun' selects the Sun et al. 3.1
+shell with Sanders kinematics, as in the test suite, instead. 'linear'
+expands about the linear pre-buckling state, and '60 17 sanders linear' is
+the Waters shell of tests/test_koiter_cylinder_Waters_sanders.py.
 """
 
 import json
@@ -58,8 +62,9 @@ H = 0.00101539
 L = 0.3556
 
 
-def operators(out, prop, R, lib, element):
-    """KC0 + KCNL(u0) and KG(u0), the operators of the eigenproblem"""
+def operators(out, prop, R, lib, element, nonlinear=True):
+    """KC0 + KCNL(u0) and KG(u0), the operators of the eigenproblem; KC0
+    alone in place of the first for a linear pre-buckling state"""
     points, weights = get_points_weights(nint=4)
     x = out['x']
     nid_pos = out['nid_pos']
@@ -91,8 +96,9 @@ def operators(out, prop, R, lib, element):
             update(*u, elem, points, weights, r, c, v)
         return coo_matrix((v, (r, c)), shape=(N, N)).tocsc()
 
-    KC = (assemble(lib.update_KC0, lib.KC0_SPARSE_SIZE)
-          + assemble(lib.update_KCNL, lib.KCNL_SPARSE_SIZE, u0))
+    KC = assemble(lib.update_KC0, lib.KC0_SPARSE_SIZE)
+    if nonlinear:
+        KC = KC + assemble(lib.update_KCNL, lib.KCNL_SPARSE_SIZE, u0)
     KG = assemble(lib.update_KG, lib.KG_SPARSE_SIZE, u0)
     return KC, KG
 
@@ -136,13 +142,16 @@ def harmonic_multipliers(out, KC, KG, R):
     return res
 
 
-def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz'):
-    if case == 'sun':
+def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz', sanders=False,
+         linear=False):
+    if case == 'sun' or sanders:
         model, lib = sa_model, bfsccylinder.sanders
         element = lib.BFSCCylinderSanders
-        R, Nxxunit = 0.2032, 20000.
     else:
         model, lib, element = vk_model, bfsccylinder, bfsccylinder.BFSCCylinder
+    if case == 'sun':
+        R, Nxxunit = 0.2032, 20000.
+    else:
         R, Nxxunit = 0.20318603, 10000.
     prop = laminated_plate(stack=STACK,
             laminaprop=(E11, E22, nu12, G12, G12, G12), plyt=H/len(STACK))
@@ -164,7 +173,8 @@ def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz'):
     try:
         out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 num_eigvals=2, koiter_num_modes=1, Nxxunit=Nxxunit,
-                NLprebuck=True, NLprebuck_eps1=eps1, NLprebuck_maxiter=30)
+                NLprebuck=not linear, NLprebuck_eps1=eps1,
+                NLprebuck_maxiter=30)
     finally:
         model.canonical_modes = canonical_modes
     Ncl = E11*H**2/(R*np.sqrt(3*(1 - nu12**2)))
@@ -200,10 +210,14 @@ def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz'):
         crest = max(crest, np.sqrt(env2).max())
     crest /= H
 
-    KC, KG = operators(out, prop, R, lib, element)
+    KC, KG = operators(out, prop, R, lib, element, nonlinear=not linear)
     mu_k = harmonic_multipliers(out, KC, KG, R)
     lowest = sorted(mu_k, key=mu_k.get)
-    res = dict(case=case, ny=ny, nx=nx, eps1=eps1, rot_deg=rot_deg, n=n,
+    res = dict(case=case,
+               kinematics='Sanders' if lib is bfsccylinder.sanders
+                          else 'von Karman',
+               NLprebuck=not linear,
+               ny=ny, nx=nx, eps1=eps1, rot_deg=rot_deg, n=n,
                lambda_c=float(out['load_mult'][0]*Nxxunit/Ncl),
                lambda_b_over_lambda_c=float(1/mu[0]), b=float(b),
                max_nodal_w_over_h=float(np.abs(W).max()/H),
@@ -220,10 +234,12 @@ def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz'):
 if __name__ == '__main__':
     args = sys.argv[1:]
     case = 'sun' if 'sun' in args else 'arbocz'
-    args = [a for a in args if a != 'sun']
+    sanders = 'sanders' in args
+    linear = 'linear' in args
+    args = [a for a in args if a not in ('sun', 'sanders', 'linear')]
     if len(args) < 2:
         print(__doc__)
         sys.exit(1)
     main(int(args[0]), int(args[1]),
          float(args[2]) if len(args) > 2 else 0.005,
-         float(args[3]) if len(args) > 3 else 0., case)
+         float(args[3]) if len(args) > 3 else 0., case, sanders, linear)
