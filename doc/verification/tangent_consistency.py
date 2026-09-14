@@ -9,6 +9,11 @@ The last term is the one the Koiter code calls KG. Whether the element splits
 the first four between KC0 and KCNL the same way is a convention; what must
 hold is that the SUM equals d fint/du, because phi2 is built as KC + KG.
 
+The same property is then measured the two ways the document quotes: the
+directional Taylor test, whose error must fall by ten at every decade of the
+step, and the least-squares fit of the coefficients that recombine KCNL and
+KG into the central difference of fint.
+
 Reported in: Section "The tangent stiffness matrix".
 Runtime: seconds.
 """
@@ -144,5 +149,58 @@ def run(name, mod, cls, sanders):
     print('  %-10s KG(elem) vs N_lin.eps_ab rel %.3e' % ('', rel(KG, KG_lin)))
 
 
+def taylor_and_fit(name, mod, cls):
+    """The directional Taylor test and the least-squares fit of the
+    coefficients of KCNL and KG, Section "Verifying consistency"
+    """
+    points, weights = get_points_weights(nint=4)
+    elem = build(cls)
+    N = num_nodes*DOF
+    #NOTE a generator of its own, so that the checks above keep their numbers;
+    #     translations of the order of a thickness of 1 mm
+    rng_td = np.random.default_rng(11)
+    u = 1e-3*rng_td.standard_normal(N)
+    d = 1e-3*rng_td.standard_normal(N)
+
+    def asm(fn, size, uu=None):
+        r = np.zeros(size, dtype=mod.INT)
+        c = np.zeros(size, dtype=mod.INT)
+        v = np.zeros(size, dtype=mod.DOUBLE)
+        if uu is None:
+            fn(elem, points, weights, r, c, v)
+        else:
+            fn(uu, elem, points, weights, r, c, v)
+        return coo_matrix((v, (r, c)), shape=(N, N)).toarray()
+
+    def fint_of(uu):
+        f = np.zeros(N)
+        mod.update_fint(uu, elem, points, weights, f)
+        return f
+
+    KC0 = asm(mod.update_KC0, mod.KC0_SPARSE_SIZE)
+    KCNL = asm(mod.update_KCNL, mod.KCNL_SPARSE_SIZE, u)
+    KG = asm(mod.update_KG, mod.KG_SPARSE_SIZE, u)
+    KTd = (KC0 + KCNL + KG) @ d
+    f0 = fint_of(u)
+    print('  %s' % name)
+    for eps in (1e-2, 1e-3, 1e-4, 1e-5, 1e-6):
+        e = (np.linalg.norm(fint_of(u + eps*d) - f0 - eps*KTd)
+             /np.linalg.norm(eps*KTd))
+        print('    eps %.0e   e %.3e' % (eps, e))
+    h = 1e-6
+    Jd = (fint_of(u + h*d) - fint_of(u - h*d))/(2*h)
+    M = np.column_stack((KCNL @ d, KG @ d))
+    c = np.linalg.lstsq(M, Jd - KC0 @ d, rcond=None)[0]
+    fit = np.linalg.norm(KC0 @ d + M @ c - Jd)/np.linalg.norm(Jd)
+    assembled = np.linalg.norm(KTd - Jd)/np.linalg.norm(Jd)
+    print('    fit c1 %.4f  c2 %.4f  residual %.1e   assembled KT %.1e'
+          % (c[0], c[1], fit, assembled))
+
+
 print('von Karman'); run('vK', vk, vk.BFSCCylinder, False)
 print('Sanders');    run('sa', sa, sa.BFSCCylinderSanders, True)
+
+print('\ndirectional Taylor test e(eps) and fit of KC0 + c1 KCNL + c2 KG to the')
+print('central difference of fint:')
+taylor_and_fit('von Karman', vk, vk.BFSCCylinder)
+taylor_and_fit('Sanders', sa, sa.BFSCCylinderSanders)
