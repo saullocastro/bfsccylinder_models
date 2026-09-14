@@ -25,10 +25,9 @@
 \maketitle
 
 \begin{abstract}
-This note documents the implementation of the single-mode Koiter method with a
-non-linear pre-buckling state in
-\texttt{koiter\_cylinder\_newton\_raphson.py} (Donnell-Mushtari-Vlasov
-kinematics) and \texttt{koiter\_cylinder\_newton\_raphson\_sanders.py}
+This note documents the implementation of the Koiter method with a
+non-linear pre-buckling state in \texttt{koiter\_cylinder.py}
+(Donnell-Mushtari-Vlasov kinematics) and \texttt{koiter\_cylinder\_sanders.py}
 (Sanders-Koiter kinematics), and of the same algorithm in the
 variable-stiffness models \texttt{koiter\_cylinder\_CTS.py} and
 \texttt{koiter\_cylinder\_CTS\_sanders.py} (Section~\ref{sec:cts}).
@@ -657,12 +656,14 @@ so the dominant eigenvector of the $2\times2$ Gram matrix of their traces
 there is well separated, and the sign is fixed by requiring the crest to point
 outwards.
 
-The partner of a mode need not be among the ones the eigen solver returned.  A
-Krylov method builds its subspace from a single starting vector, so it finds
-one direction of a degenerate eigenspace and then moves on to the next
-multiplier: asking for the two lowest multipliers of the shell of
-Section~\ref{sec:results} returns one member of the critical pair and one
-member of the next pair, $3.3\times10^{-4}$ away.  A missing partner is
+The partner of a mode need not be among the ones the eigen solver returned.
+Whether ARPACK returns both members of a degenerate pair, or one member and
+then the next multiplier, is decided by round-off as well: asking for the two
+lowest multipliers of the Arbocz shell of Section~\ref{sec:results} with
+$n_y = 40$ returned one member of the critical pair and one member of the next
+pair, $0.19$ per cent away, while a CI runner returned both members of the
+critical pair on the coarse mesh of Section~\ref{sec:ortho-test}.  A missing
+partner is
 recovered through the cyclic shift $\boldsymbol{P}$ of
 Section~\ref{sec:axisymmetric}, which maps a mode onto another mode of the
 same pair, after removal of the axial rigid body translation that restores the
@@ -806,12 +807,14 @@ then is ``the cluster'' a well-defined set, and only then is a multi-mode
 truncation of it well posed.  The pre-buckling treatment of this document is
 therefore a prerequisite for multi-mode Koiter, not an alternative to it.
 
-Two pieces of the implementation used to stand between this and a multi-mode
-analysis.  The constant of the orthogonality condition was taken from the
+Three pieces of the implementation used to stand between this and a
+multi-mode analysis.  The right-hand side of the second-order fields divided
+the load term by the number of modes, which is consistent for one mode only;
+the constant of the orthogonality condition was taken from the
 symmetrisation of $\phi_{30}$, which is exact only for coinciding mode
-indices, and the row border of the bordered system carried one weighted
+indices; and the row border of the bordered system carried one weighted
 condition per Koiter mode while the null space of $\phi_2$ has more
-directions than that.  Both are now generalised
+directions than that.  All three are now generalised
 (Section~\ref{sec:secondorder}); what of the multi-mode path remains
 unchecked is listed in Section~\ref{sec:limits}.
 
@@ -1055,11 +1058,14 @@ left once they are projected out.  A QR factorisation without pivoting would
 be misled by the duplicate that every Koiter mode has among the eigenvectors,
 giving its round-off a column of its own.
 
-The partner has to be rebuilt more often than not.  On the $n_y = 40$ meshes
-of both reference shells, with the two and four multipliers the tests ask
-for, the eigen solver returns no partner at all: the Arbocz shell gives
-$n = 10$ and then $n = 11$, $0.19\%$ above, and the Sun shell
-$n = 10, 9, 7, 11$.  The column border used to hold the critical mode alone.
+The partner often has to be rebuilt.  On the $n_y = 40$ meshes of both
+reference shells, with the two and four multipliers the tests ask for, the
+eigen solver returned no partner at all on the machine these figures were
+measured on: the Arbocz shell gave $n = 10$ and then $n = 11$, $0.19\%$
+above, and the Sun shell $n = 10, 9, 7, 11$.  Asking for four multipliers of
+the Arbocz shell returned both members of both pairs instead; which of the two
+happens is decided by round-off.  The column border used to hold the critical
+mode alone.
 Its partner $\boldsymbol{p}$ is a null vector of $\phi_2$ with
 $\phi_{20,1}\cdot\boldsymbol{p} = 0$, by the orthogonality of the harmonics
 $\cos(n y/R)$ and $\sin(n y/R)$, and so was a null vector of the whole
@@ -1095,8 +1101,11 @@ kinematics, for every pair of two Koiter modes and along every direction of
 the null space, the modes having been made generic by a fixed random field
 added to the eigenvectors, since with genuine cylinder modes every constant
 vanishes and the weighted and Euclidean conditions coincide.  A second test
-checks that the rebuilt partner lies in the column border on a mesh where the
-eigen solver does not return it.
+checks that the rebuilt partner lies in the column border.  Both keep a single
+eigenvector per multiplier, so that the partner is always rebuilt: whether
+the eigen solver returns it is decided by round-off, and with both members of
+the critical pair as the two Koiter modes the null space would have no
+direction beyond them to check.
 
 \subsection{What the weighted condition does, and does not, change}
 
@@ -1146,9 +1155,9 @@ With the second-order fields available, the coefficients are
 	\Big]
 \end{multline}
 
-The buckling modes are normalised so that the largest translational amplitude
-equals the shell thickness, which is the normalisation used by the reference
-solutions.
+The buckling modes are normalised so that the largest nodal translation
+equals the shell thickness.  The reference solutions normalise by the crest
+amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
 
 %==============================================================================
 \section{Algorithm}
@@ -1491,16 +1500,17 @@ where the edge restraint acts.
 
 \medskip
 \noindent
-\textbf{The default iteration budget is not enough.}  With the default
-\texttt{NLprebuck\_maxiter=12} the $n_y = 45$ run exhausted the budget and
+\textbf{The iteration budget.}  With \texttt{NLprebuck\_maxiter=12}, the
+default at the time, the $n_y = 45$ run exhausted the budget and
 stopped at $\lambda_b/\lambda_c = 0.9933$, short of the $0.995$ requested,
 after one Newton-Raphson back-off and two overshoot-and-step-back cycles;
 the table above was produced with \texttt{NLprebuck\_maxiter=30}, which
-converged every mesh with no warning at all.  The default was tuned on the
-constant-stiffness shells of Section~\ref{sec:results}, where $\lambda_c$
-moves less with $\lambda_b$ and four to seven load steps suffice.  A CTS
-design with a dense spectrum spends steps backing off, and the budget has to
-be raised accordingly.  The symptom is explicit --- the run prints
+converged every mesh with no warning at all, and $30$ is now the default of
+every model.  The former default had been tuned on the constant-stiffness
+shells of Section~\ref{sec:results}, where $\lambda_c$ moves less with
+$\lambda_b$ and four to seven load steps suffice.  A CTS design with a dense
+spectrum spends steps backing off and needs the larger budget.  The symptom
+of a budget still too small is explicit --- the run prints
 \texttt{WARNING: the iterative eigenvalue algorithm stopped at
 lambda\_b/lambda\_c = ...} --- and must not be ignored, because a state
 stopped short of the requested neighbourhood is exactly the regime
@@ -1603,8 +1613,9 @@ harmonic content of the critical mode, never the convergence history.
         ten degrees of freedom per node and resolves the same harmonic with
         far fewer elements; $n_y = 60$ to $80$ is the corresponding
         range here.
-  \item \textbf{Raise \texttt{NLprebuck\_maxiter}.}  The default $12$ is
-        a constant-stiffness figure.  Use $30$ for CTS designs, and treat the
+  \item \textbf{Mind \texttt{NLprebuck\_maxiter}.}  The default $30$
+        converges the CTS design of Section~\ref{sec:cts-nl}, where the
+        former default $12$ did not.  Raise it further if needed, and treat the
         \texttt{WARNING} about stopping short of
         $1 - \texttt{NLprebuck\_eps1}$ as a failure rather than a note: the
         expansion is then made about a state that is not in the neighbourhood
@@ -1627,15 +1638,23 @@ harmonic content of the critical mode, never the convergence history.
 \begin{enumerate}\itemsep3pt
   \item \textbf{Degenerate critical modes.}  The rotation inside the
         degenerate pair still moves $b_{1111}$ by sixteen per cent on the
-        $n_y = 40$ mesh.  The canonicalisation of
+        $n_y = 40$ mesh, almost all of it through the nodal normalisation
+        (Section~\ref{sec:normalisation}).  The canonicalisation of
         Section~\ref{sec:canonical} makes the choice reproducible rather than
         arbitrary; it does not make it converged.  The bordered system no
         longer adds to this, its column and row borders spanning the whole
-        null space (Section~\ref{sec:secondorder}).
+        null space (Section~\ref{sec:secondorder}).  With more than one Koiter
+        mode the retained set is not reproducible either: whether the eigen
+        solver returns both members of the critical pair, or one member and
+        then the next multiplier, is decided by round-off, and the two give
+        different modes, hence different $a_{ijk}$ and $b_{ijkl}$.
   \item \textbf{Resolution of the second-order field.}  The second-order field
-        carries the harmonic $2n$, which the meshes used here sample with
-        about two nodes per wave.  This, and not the expansion itself, is what
-        limits $b_{ijkl}$; the buckling load is far less affected.
+        carries the harmonic $2n$, which the $n_y = 40$ meshes of the test
+        suite sample with about two nodes per wave.  Resolving it is worth
+        about $2$ per cent of $b_{1111}$ on the Arbocz shell
+        (Section~\ref{sec:gap}); the nodal normalisation is worth more on
+        those meshes (Section~\ref{sec:normalisation}), and the buckling load
+        is far less affected than either.
   \item \textbf{The rest of the multi-mode path.}  The orthogonality
         conditions, the row border and the right-hand side of the
         second-order fields are those of the expansion for any number of
@@ -1731,7 +1750,8 @@ script & produces & runtime \\
 \texttt{second\_order\_rhs.py}
   & Section~\ref{sec:secondorder} & seconds \\
 \texttt{reference\_b\_convergence.py}
-  & Sections~\ref{sec:canonical} and \ref{sec:gap} & 2--25~min per run \\
+  & Sections~\ref{sec:canonical}, \ref{sec:normalisation} and \ref{sec:gap}
+  & 2--25~min per run \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1743,9 +1763,9 @@ second variation from the strain measures the Koiter expansion assumes and
 compares them against the compiled element; it includes a deliberately wrong
 control, the Sanders element driven with von Karman kinematics, which fails at
 $7.8\times10^{-4}$ and so establishes that the agreement at $10^{-16}$ is not
-vacuous.  \texttt{cts\_mesh\_convergence.py} runs with
-\texttt{NLprebuck\_maxiter=30} rather than the default, for the reason given
-in Section~\ref{sec:cts-nl}.
+vacuous.  \texttt{cts\_mesh\_convergence.py} is the run that exhausted the
+former default \texttt{NLprebuck\_maxiter=12}, which is why the default is now
+$30$, see Section~\ref{sec:cts-nl}.
 
 \subsection{Literature verification cases}
 \label{sec:appendix-tests}
@@ -1795,7 +1815,7 @@ test & shell & reference \\
 \end{center}
 
 \noindent
-The last of these compares the CTS and \texttt{newton\_raphson} modules
+The last of these compares the CTS and the constant-stiffness modules
 character by character over the regions that implement the algorithm of this
 document.  The algorithm was spliced from one into the other rather than
 retyped, and that test is what keeps the two from diverging silently; the

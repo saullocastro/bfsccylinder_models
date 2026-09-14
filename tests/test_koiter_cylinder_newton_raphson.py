@@ -46,49 +46,26 @@ def test_Sun_et_al():
     Ncl = E11*h**2/(R*np.sqrt(3*(1-nu12**2))) # N/m
     Ncr = out['Pcr']/(2*np.pi*R) # N/m
     print('normalized buckling load', Ncr/Ncl)
-    #NOTE the paper reports a classical (linear eigenvalue) buckling load of
-    #     175.5 kN and a buckling load of 164.3 kN accounting for the nonlinear
-    #     pre-buckling state, respectively 0.3508 and 0.3284 once normalized by
-    #     Ncl. ANILISA and DIANA give 0.3286 and 0.3244 (Section 3.1).
-    #
-    #     The expansion is made about a CONVERGED nonlinear pre-buckling
-    #     state at lambda_b/lambda_c = 0.996, reached in seven load steps
-    #     taking a single Newton-Raphson iteration each, with no step back
-    #     off, against the 0.142 that solving at the reference load Nxxunit
-    #     used to give. For reference, the ANILISA n-search with rigorous
-    #     nonlinear pre-buckling and SS-3 gives, for the same shell, 0.337088
-    #     at n=7 and an absolute minimum of 0.328594 at n=11 (Table 3 of
-    #     Arbocz, Starnes and Nemeth, AIAA-2001-1392). This mesh buckles with
-    #     n=10, and so does ny=50, which gives 0.347244, 0.3% away. The value
-    #     below is a REGRESSION value for this mesh, not a converged one
+    #NOTE the paper reports 175.5 kN from a linear eigenvalue analysis and
+    #     164.3 kN with the nonlinear pre-buckling state, 0.3508 and 0.3284
+    #     normalized by Ncl, and ANILISA and DIANA 0.3286 and 0.3244. The
+    #     ANILISA n-search with rigorous nonlinear pre-buckling and SS-3 gives
+    #     0.337088 at n=7 and its minimum 0.328594 at n=11 (Table 3 of Arbocz,
+    #     Starnes and Nemeth, AIAA-2001-1392). This mesh buckles with n=10, as
+    #     does ny=50. REGRESSION value for this mesh, not a converged one
     assert np.isclose(Ncr/Ncl, 0.346127, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    #NOTE regression value for this mesh, NOT a converged one, and not
-    #     directly comparable to the b = -0.3772 of Table 2 (ANILISA -0.3761,
-    #     DIANA -0.3743), which belongs to the n=11 edge buckling mode where
-    #     this mesh buckles with n=10.
-    #
-    #     b_1111 is more mesh sensitive than the buckling load, ny=50 giving
-    #     -0.222844 against the value below, 3.4% away, where the buckling
-    #     loads of the two meshes are 0.3% apart. It is also sensitive to
-    #     which member of the degenerate buckling pair the expansion is made
-    #     about: rotating the critical mode by 30 degrees inside its own
-    #     eigenspace, which leaves the pre-buckling state and the buckling
-    #     load untouched to eleven digits, moves it to -0.192752, 16% away.
-    #     That is almost entirely the normalization of the mode by its
-    #     largest nodal translation, and not the resolution of the harmonic
-    #     2n: the mode is skewed, and the radial crest of the canonical member
-    #     stands 22% above its largest nodal translation on this mesh, 8%
-    #     missed around the circumference and the rest between axial
-    #     stations 36 mm apart. Normalized by the crest amplitude the two
-    #     members give -0.15456 and -0.15022, 2.9% apart, a dependence the
-    #     discrete symmetry allows only because 4n is a multiple of ny here
-    #     (see canonical_modes). The value below is for the nodal
-    #     normalization the models use
-    #     canonical_modes fixes the choice to the mesh aligned member, which
-    #     is what makes the value below reproducible: 9e-9 between a single
-    #     threaded and a multi threaded run
+    #NOTE REGRESSION value for this mesh, not a converged one, and not
+    #     comparable to the b = -0.3772 of Table 2 (ANILISA -0.3761, DIANA
+    #     -0.3743), which belongs to the n=11 mode. ny=50 gives -0.222844,
+    #     3.4% away. Rotating the critical mode by 30 degrees inside its pair
+    #     moves it to -0.192752, almost all of it through the normalization by
+    #     the largest nodal translation, which misses the crest of this skewed
+    #     mode by 22%: normalized by the crest the two members give -0.15456
+    #     and -0.15022. canonical_modes fixes the member, which makes the value
+    #     reproducible, 9e-9 between a single and a multi threaded run. See
+    #     "Buckling modes of a cylinder" in doc/nlprebuck_implementation.tex
     assert np.isclose(b_1111, -0.230556, rtol=0.05)
 
 
@@ -101,15 +78,10 @@ def test_Arbocz_Starnes_2002():
     #of the NASA layered composite shell AW-CYL-1-1, laminate [+-45/0/90]s.
     L = 0.3556 # m, 14.0 in = 355.600 mm
     R = 0.20318603 # m, 7.99945 in = 203.18603 mm
-    #NOTE ny=40 keeps this test at about 4 min. The ny=60 mesh converges in
-    #     four load steps with no step back off and gives lambda_c = 0.330603
-    #     with n=11 circumferential waves and b_1111 = -0.356457, which are
-    #     the figures worth comparing with the literature below. That mesh
-    #     was unusable until bfsccylinder 0.6.0: with the tangent stiffness
-    #     matrix inconsistent with the internal force vector the
-    #     Newton-Raphson contracted by about 0.95 per iteration there,
-    #     exhausted NR_maxiter at every load step beyond lambda_b/lambda_c =
-    #     0.92, and the load stepping saturated near 0.94
+    #NOTE ny=40 keeps this test at about 4 min. The ny=60 mesh, which needs
+    #     bfsccylinder >= 0.6.0 to converge, gives lambda_c = 0.330603 with
+    #     n=11 circumferential waves and b_1111 = -0.356457, the figures worth
+    #     comparing with the literature below
     ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))
@@ -135,80 +107,33 @@ def test_Arbocz_Starnes_2002():
     #     normalize every buckling load reported in the paper
     ref = E11*h**2/(R*np.sqrt(3*(1-nu12**2))) # N/m
     #NOTE out['eigvals'] are the raw eigenvalues of the shifted problem, the
-    #     load multiplier is out['load_mult'] = -1/eigvals
+    #     load multiplier is out['load_mult'] = -lambda_b/eigvals
     lambda_c = out['load_mult'][0]*Nxxunit/ref
     print('lambda_c', lambda_c)
-    #NOTE before the iterative eigenvalue algorithm of Sun et al. Eqs. (44) to
-    #     (46) was implemented, the expansion was made about the state at the
-    #     reference load, lambda_b/lambda_c = 0.07, and this model returned the
-    #     MEMBRANE pre-buckling results of the paper, lambda_c = 0.365992
-    #     (Level-1 AXBIF, m=1, n=7) and 0.364370 (n=11) or 0.364715 (n=7) with
-    #     Level-2 ANILISA and SS-3. It now CONVERGES at lambda_b/lambda_c =
-    #     0.999 and returns the rigorous nonlinear pre-buckling branch
-    #     instead, the edge restraint driving the critical mode to a high
-    #     circumferential wave number and dropping the load by about 9%.
-    #
-    #     The Level-2 ANILISA n-search gives 0.329163 at n=10 and its absolute
-    #     minimum 0.328594 at n=11, and Level-3 STAGS-A gives 0.327759 (n=11,
-    #     161x201 mesh). This mesh buckles with n=10 and gives the 0.331413
-    #     below, 0.7% above the ANILISA n=10 entry, and ny=60 buckles with
-    #     n=11 and gives 0.330603, 0.6% above the ANILISA n=11 one. Both are
-    #     still REGRESSION values for their mesh
+    #NOTE expanded about the state at the reference load instead,
+    #     lambda_b/lambda_c = 0.07, this model returns the MEMBRANE
+    #     pre-buckling result of the paper, lambda_c = 0.365992 (Level-1
+    #     AXBIF, n=7). The Level-2 ANILISA n-search with rigorous nonlinear
+    #     pre-buckling gives 0.329163 at n=10 and its minimum 0.328594 at n=11,
+    #     and Level-3 STAGS-A 0.327759 (n=11, 161x201 mesh). This mesh buckles
+    #     with n=10, 0.7% above the ANILISA n=10 entry; ny=60 buckles with n=11,
+    #     0.6% above the n=11 one. REGRESSION values for their mesh
     assert np.isclose(lambda_c, 0.331413, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    #NOTE regression value for this mesh, NOT a converged one, but of the
-    #     right sign and the right order now. Level-2 ANILISA reports
-    #     b = -0.37605 for the n=11 mode with rigorous nonlinear pre-buckling
-    #     (alpha = 0.46663, beta = -0.22174) and Sun et al. Table 2 gives
-    #     -0.3772. This mesh buckles with n=10 and gives the -0.335975 below;
-    #     ny=60 buckles with n=11 and gives -0.356457, 5% from the ANILISA
-    #     value for that mode.
+    #NOTE REGRESSION value for this mesh, not a converged one. Level-2
+    #     ANILISA gives b = -0.37605 for the n=11 mode with rigorous nonlinear
+    #     pre-buckling (alpha = 0.46663, beta = -0.22174), and Sun et al.
+    #     Table 2 -0.3772. This mesh buckles with n=10; ny=60 buckles with n=11
+    #     and gives -0.356457, 5% short of ANILISA. That gap is not the
+    #     single-mode truncation, the reference coefficients being single-mode
+    #     ones too; "The gap to ANILISA" in doc/nlprebuck_implementation.tex
+    #     takes it apart, leaving about 4% of b unexplained by the
+    #     normalization, the mesh and the expansion point.
     #
-    #     That 5% is not the single-mode truncation, the ANILISA and Sun et al.
-    #     coefficients being single-mode ones too. Taken apart in the
-    #     implementation note, section "The gap to ANILISA": normalized by the
-    #     radial crest, as the reference coefficients are, instead of the
-    #     largest nodal translation, b settles in nx from nx=37 (the nx
-    #     dependence at the nodes is the crest falling between axial
-    #     stations), converges in ny as the harmonic 2n gets resolved, to
-    #     about -0.3646 from ny = 60, 88, 120, and moves to about -0.360 at
-    #     the bifurcation point itself, where lambda_c = 0.32867 agrees with
-    #     ANILISA to 0.02%. About 4% of b remains unexplained by the mesh, the
-    #     normalization and the expansion point
-    #
-    #     A negative b is an imperfection sensitive shell, which is what this
-    #     one is. It used to come out POSITIVE here, +0.410664, and the sign
-    #     was put down to a single mode expansion about a degenerate critical
-    #     mode being unable to determine it. That was wrong. The tangent
-    #     stiffness matrix of bfsccylinder was not the derivative of the
-    #     internal force vector, by 1.4e-3 in a directional Taylor test, and
-    #     the sign of b went with it, as did 9% of lambda_c and the
-    #     convergence of the Newton-Raphson on finer meshes. Fixed in
-    #     bfsccylinder 0.6.0, which requirements.txt now asks for.
-    #
-    #     Which member of the degenerate pair the expansion is made about
-    #     still matters, by 16% on the Sun et al. case of this file, but no
-    #     longer for the sign. canonical_modes fixes that choice.
-    #
-    #     Imposing the stiffness weighted orthogonality of Sun et al. Eq. (33)
-    #     on the second order field, which is what the code does, was measured
-    #     against the Euclidean condition before the tangent was fixed and
-    #     moved the second order field by 6.5e-7 relative, a difference the
-    #     two conditions are near-coincident on because the null space
-    #     component of uab they disagree on is small to begin with. b_ijkl
-    #     sees uab through phi3_ab @ uab, whose contraction with the buckling
-    #     modes is the numerator of a_ijk, and a_ijk vanishes for this
-    #     symmetric bifurcation.
-    #
-    #     The eigen solver returns no degenerate partner of the critical mode
-    #     on this mesh, so the column border of the bordered system used to
-    #     miss it, and it was a null vector of the whole bordered matrix. The
-    #     partner is now rebuilt and constrained by the weighted condition
-    #     too; on the ny=60 mesh that changes b_1111 by 4e-7 relative. For a
-    #     single mode of a cylinder the weighted and the Euclidean conditions
-    #     along the partner coincide, its harmonic n being disjoint from the
-    #     harmonics 0 and 2n of uab
+    #     A negative b is an imperfection sensitive shell, which this one is.
+    #     b came out positive, +0.410664, until bfsccylinder 0.6.0 made the
+    #     tangent stiffness matrix consistent with the internal force vector
     assert np.isclose(b_1111, -0.335975, rtol=0.05)
 
 if __name__ == '__main__':

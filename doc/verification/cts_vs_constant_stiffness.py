@@ -1,5 +1,5 @@
-"""CTS model in its constant-stiffness limit against the newton_raphson model,
-with the nonlinear pre-buckling algorithm switched on. The two must agree to
+"""CTS models in their constant-stiffness limit against koiter_cylinder.py and
+koiter_cylinder_sanders.py, NLprebuck off and on. The two must agree to
 round off: same mesh, same laminate, same algorithm.
 
 Reported in: Section "The variable-stiffness CTS model".
@@ -19,8 +19,8 @@ from composites import laminated_plate
 
 import bfsccylinder_models.koiter_cylinder_CTS as cts_vk
 import bfsccylinder_models.koiter_cylinder_CTS_sanders as cts_sa
-import bfsccylinder_models.koiter_cylinder_newton_raphson as nr_vk
-import bfsccylinder_models.koiter_cylinder_newton_raphson_sanders as nr_sa
+import bfsccylinder_models.koiter_cylinder as nr_vk
+import bfsccylinder_models.koiter_cylinder_sanders as nr_sa
 
 L = 0.3
 R = 0.136/2
