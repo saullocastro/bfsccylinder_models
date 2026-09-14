@@ -36,17 +36,9 @@ def axisymmetric_basis(axi_order, bu, DOF):
 
     The two give the same iterates here, to eleven digits on the meshes of
     the test suite, so this is a simplification and a saving rather than a
-    correction.
-
-    It is in particular not what made the Newton-Raphson converge. Until
-    bfsccylinder 0.6.0 the tangent stiffness matrix was not the derivative of
-    the internal force vector, a directional Taylor test of
-    KC0 + KCNL(u) + KG(u) against fint plateauing at a relative error of
-    1.4e-3 instead of falling with the step, which left the iteration an
-    inexact Newton one contracting by about 0.3 per iteration at ny=40 and by
-    0.95 at ny=60, where it exhausted NR_maxiter at every load step. With the
-    consistent tangent of 0.6.0 the same load steps take a single iteration
-    each and ny=60 converges in four of them.
+    correction. Nor is it what made the Newton-Raphson converge on fine
+    meshes, which was the consistent tangent stiffness matrix of
+    bfsccylinder 0.6.0.
 
     Returns the basis and the boolean mask of its unknown coordinates. A
     reduced coordinate is known as soon as one of the nodes it spans is
@@ -108,38 +100,80 @@ def rotated(u, axi_order, DOF, shift=1):
     return rot.reshape(-1)
 
 
+def degenerate_partner(phi, bu, axi_order, DOF):
+    """The other member of the degenerate pair of the mode phi
+
+    Built from the rotation of phi by one element, :func:`rotated`, the
+    cyclic symmetry of the mesh making it another mode of the same pair,
+    orthogonalized against phi and scaled to its norm.
+
+    Returns None when there is no partner to build: an axisymmetric mode is
+    its own rotation, and so, up to the sign, is the mode with ny/2
+    circumferential waves; and a rotation that leaves anything on a
+    constrained degree of freedom other than the axial translation cannot be
+    brought back into the admissible space without leaving the eigenspace.
+
+    Parameters
+    ----------
+    phi : array-like
+        The mode, over every degree of freedom.
+    bu : array-like
+        Boolean mask of the unknown degrees of freedom.
+    axi_order : array-like
+        Node positions on the mesh, from :func:`mesh_order`.
+    DOF : int
+        Degrees of freedom per node.
+
+    """
+    phi = np.asarray(phi, dtype=np.float64)
+    phi_norm = np.sqrt(phi @ phi)
+    psi = rotated(phi, axi_order, DOF)
+    #NOTE the constraint that suppresses the axial translation sits on a
+    #     single node and is not itself symmetric, so the rotated mode does
+    #     not satisfy it. An axial rigid body translation carries no strain
+    #     and is annihilated by both stiffness matrices, so subtracting one
+    #     restores the constraint without taking the mode out of its
+    #     eigenspace. Truncating the offending degree of freedom instead does
+    #     take it out, and since the operator of the second order field is
+    #     singular along the mode, the error is then amplified without bound
+    u_dofs = np.arange(0, bu.shape[0], DOF)
+    pinned = u_dofs[~bu[u_dofs]]
+    if pinned.size:
+        psi[u_dofs] -= psi[pinned].mean()
+    #NOTE anything the rotation still leaves on a constrained degree of
+    #     freedom would have to be truncated, and the result would no longer
+    #     be a mode
+    if np.abs(psi[~bu]).max(initial=0.) > 1.e-10*np.abs(psi).max():
+        return None
+    psi -= (psi @ phi)/(phi @ phi)*phi
+    psi_norm = np.sqrt(psi @ psi)
+    if psi_norm <= 1.e-8*phi_norm:
+        return None
+    return psi*(phi_norm/psi_norm)
+
+
 def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     """Fix the rotation left free inside each degenerate group of modes
 
     The buckling modes of a cylinder come in degenerate pairs, one for each
     sign of the circumferential wave number, and every rotation of a pair is
     again a pair of buckling modes. Which member of it comes out of the eigen
-    solver is decided by round off, so it changes with the BLAS
-    implementation, and b_ijkl is not invariant under that rotation: the
-    second order field of a mode with n circumferential waves carries the
-    harmonic 2n, which a mesh sized for the buckling mode itself barely
-    resolves. Measured on the Sun et al. case of the test suite, ny = 40,
-    rotating the critical pair by 30 degrees moves b_1111 from -0.230556 to
-    -0.192752, 16%, with everything else, the pre-buckling state and the
-    buckling load included, unchanged to eleven digits. Before the consistent
-    tangent of bfsccylinder 0.6.0 the same rotation moved it from -0.0008 to
-    0.2744, sign included, so most of that dependence was the tangent rather
-    than the mesh; what is left is the mesh.
-
-    Each pair is therefore rotated to the member whose crest falls on the
-    y = 0 generator, a property of the mesh and not of the arithmetic. That
-    makes b_ijkl reproducible; it does not make it mesh converged, and only a
-    mesh that resolves the harmonic 2n does.
+    solver is decided by round off, and b_ijkl is not invariant under that
+    rotation: on the ny = 40 meshes of the test suite a rotation by 30 degrees
+    moves b_1111 by 16% on the Sun et al. case and by 22% on the Arbocz and
+    Starnes case, almost all of it through the normalization of the mode by
+    its largest nodal translation, which misses the crest of these skewed
+    modes. Each pair is therefore rotated to the member whose crest falls on
+    the y = 0 generator, a property of the mesh and not of the arithmetic.
+    That makes b_ijkl reproducible; it does not make it mesh converged.
 
     The partner of a mode need not be among the ones the eigen solver
-    returned. A Krylov method builds its subspace from a single starting
-    vector, so it finds one direction of a degenerate eigenspace and then
-    moves on to the next multiplier: asking scipy for the two lowest
-    multipliers of the Arbocz and Starnes cylinder of the test suite returns
-    one member of the critical pair and one member of the next pair, 3.3e-4
-    away. A missing partner is recovered here through :func:`rotated`, the
-    cyclic symmetry of the mesh making the rotation of a mode another mode of
-    the same pair.
+    returned either: whether ARPACK returns both members of a pair, or one
+    member and then the next multiplier, is decided by round off too. A
+    missing partner is recovered here through :func:`rotated`, the cyclic
+    symmetry of the mesh making the rotation of a mode another mode of the
+    same pair. See Section "Buckling modes of a cylinder" of
+    doc/nlprebuck_implementation.tex for the measurements.
 
     Parameters
     ----------
@@ -178,38 +212,16 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
         i1 = grp[1] if len(grp) == 2 else None
         phi = np.zeros(bu.shape[0], dtype=np.float64)
         phi[bu] = eigvecsu[:, i0]
-        phi_norm = np.sqrt(phi @ phi)
         if i1 is not None:
             psi = np.zeros(bu.shape[0], dtype=np.float64)
             psi[bu] = eigvecsu[:, i1]
         else:
-            psi = rotated(phi, axi_order, DOF)
-            #NOTE the constraint that suppresses the axial translation sits on
-            #     a single node and is not itself symmetric, so the rotated
-            #     mode does not satisfy it. An axial rigid body translation
-            #     carries no strain and is annihilated by both stiffness
-            #     matrices, so subtracting one restores the constraint without
-            #     taking the mode out of its eigenspace. Truncating the
-            #     offending degree of freedom instead does take it out, and
-            #     since the operator of the second order field is singular
-            #     along the mode, the error is then amplified without bound
-            u_dofs = np.arange(0, bu.shape[0], DOF)
-            pinned = u_dofs[~bu[u_dofs]]
-            if pinned.size:
-                psi[u_dofs] -= psi[pinned].mean()
-            #NOTE anything the rotation still leaves on a constrained degree
-            #     of freedom would have to be truncated, so the pair is left
-            #     alone rather than canonicalized with a corrupted partner
-            if np.abs(psi[~bu]).max(initial=0.) > 1.e-10*np.abs(psi).max():
+            psi = degenerate_partner(phi, bu, axi_order, DOF)
+            #NOTE no partner, or none that could be kept admissible, so the
+            #     mode is left alone rather than canonicalized with a
+            #     corrupted one
+            if psi is None:
                 continue
-            psi -= (psi @ phi)/(phi @ phi)*phi
-            psi_norm = np.sqrt(psi @ psi)
-            #NOTE an axisymmetric mode is its own rotation and has no partner,
-            #     and so has the mode with ny/2 circumferential waves, whose
-            #     rotation by one element is minus itself
-            if psi_norm <= 1.e-8*phi_norm:
-                continue
-            psi *= phi_norm/psi_norm
         #NOTE of the two members of a pair one has a crest on the generator
         #     and the other a node, so the dominant eigenvector of the 2 by 2
         #     Gram matrix of their traces there is well separated

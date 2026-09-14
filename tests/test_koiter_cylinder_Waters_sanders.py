@@ -5,7 +5,7 @@ sys.path.append(r'../../bfsccylinder')
 import numpy as np
 from composites import laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import fkoiter_cyl_SS3
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3
 
 def test_Waters_shell():
     #Arbocz, J., and Starnes, J. H., 2002, “On a High-Fidelity Hierarchical Approach to Buckling Load Calculations,” New Approaches to Structural Mechanics, Shells and Biological Structures, pp. 271–292.
@@ -20,7 +20,7 @@ def test_Waters_shell():
     G12 = 6.00257e9 # Pa
     nu12 = 0.300235
     rho = 1611 # kg/m3
-    stack = [45, -45, 0, 90, 90, 0, -45, 45] #NOTE there is no different in inverting +- 45, significant different inverting 0 and 90 plies
+    stack = [45, -45, 0, 90, 90, 0, -45, 45] #NOTE swapping +45 and -45 makes no difference, swapping 0 and 90 a significant one
     plyt = 0.00012692375 # m
     h = plyt*len(stack)
 
@@ -36,11 +36,8 @@ def test_Waters_shell():
 
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
-    #NOTE reference value updated after fixing eps''_ab in the Koiter tensors,
-    #     which was falling back to von Karman kinematics (see
-    #     koiter_cylinder_newton_raphson_sanders.py). DIANA CQ40L reports
-    #     b_1111 = -0.044816 for this shell (Table 6 of the SciTech 2022
-    #     paper), so the present value is within 0.4% of that reference.
+    #NOTE DIANA CQ40L gives b_1111 = -0.044816 for this shell, Table 6 of
+    #     Castro and Jansen (AIAA SciTech 2022), 0.4% from the value below
     assert np.isclose(b_1111, -0.04498374754739185, rtol=0.02)
 
 

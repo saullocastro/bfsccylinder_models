@@ -1,9 +1,12 @@
 """Structure of the near-critical buckling spectrum.
 
-These are the measurements that size a multi-mode Koiter expansion, and they
-are what bounds the agreement of the present SINGLE-mode b_ijkl with the
-literature: the expansion retains one eigenvector out of a cluster of six to
-eight.
+These are the measurements that size a multi-mode Koiter expansion. They do
+NOT bound the agreement of the single-mode b_1111 with the literature: the b
+of ANILISA and of Sun et al. are single-mode coefficients too, and a
+multi-mode expansion computes a different quantity, the interaction
+coefficients b_ijkl of the retained modes, rather than a better
+approximation of that one. What bounds the single-mode agreement is the
+mesh, see the notes of test_koiter_cylinder_newton_raphson.py.
 
 References
 ----------
@@ -29,8 +32,7 @@ import numpy as np
 import pytest
 from composites import laminated_plate
 
-from bfsccylinder_models.koiter_cylinder_newton_raphson_sanders import (
-        fkoiter_cyl_SS3)
+from bfsccylinder_models.koiter_cylinder_sanders import fkoiter_cyl_SS3
 
 L = 0.3556      # m
 R = 0.2032      # m

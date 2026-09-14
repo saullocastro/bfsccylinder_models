@@ -1,8 +1,8 @@
 """The CTS models must carry the SAME NLprebuck algorithm as the
-newton_raphson models.
+constant-stiffness models.
 
-The algorithm was spliced from koiter_cylinder_newton_raphson*.py into
-koiter_cylinder_CTS*.py rather than retyped, so that the two model families
+The algorithm was spliced from koiter_cylinder.py and koiter_cylinder_sanders.py
+into koiter_cylinder_CTS*.py rather than retyped, so that the two model families
 cannot drift apart. This test asserts that character for character, on the
 regions that are meant to be shared: the axisymmetric pre-buckling solver and
 the iterative eigenvalue algorithm, the flag note, the pre-buckling state and
@@ -27,7 +27,11 @@ PKG = os.path.join(HERE, os.pardir, 'bfsccylinder_models')
 REGIONS = [
     ('    def assemble_KG(u):', '    Pcr = load_mult[0]*Nxxunit*circ'),
     ('    #NOTE this flag multiplies', '    flag = NLprebuck'),
+    ('    #NOTE the null space of phi2, against which',
+     '    num_cond = len(ucond)'),
     ('    #NOTE phi2 must be the SAME operator', '    phi2uu = KCuu + KGuu*mu[0]'),
+    ('    #NOTE the second order fields solve the terms of order',
+     '                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]'),
     ('    #NOTE phi2 is singular by construction',
      '            uab[(modei, modej)] = uijbar'),
     ('                #NOTE the pre-buckling STATE', '                Nia0 = Nib0 = Nic0'),
@@ -37,8 +41,8 @@ REGIONS = [
 ]
 
 PAIRS = [
-    ('koiter_cylinder_CTS.py', 'koiter_cylinder_newton_raphson.py'),
-    ('koiter_cylinder_CTS_sanders.py', 'koiter_cylinder_newton_raphson_sanders.py'),
+    ('koiter_cylinder_CTS.py', 'koiter_cylinder.py'),
+    ('koiter_cylinder_CTS_sanders.py', 'koiter_cylinder_sanders.py'),
 ]
 
 

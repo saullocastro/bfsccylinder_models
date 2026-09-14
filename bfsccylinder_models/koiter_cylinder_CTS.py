@@ -17,7 +17,8 @@ from bfsccylinder import (BFSCCylinder, update_KC0, update_KCNL, update_KG,
         KG_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
-        axisymmetric_basis, project_axisymmetric, canonical_modes)
+        axisymmetric_basis, project_axisymmetric, canonical_modes,
+        degenerate_partner)
 
 num_nodes = 4
 
@@ -27,7 +28,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         ny_nx_aspect_ratio=1, cg_x0=None,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
-        NLprebuck_eps1=0.005, NLprebuck_maxiter=12, NR_maxiter=40,
+        NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
         NR_eps=1.e-4, NR_eps_accept=1.e-3,
         max_ny_nx_aspect_ratio=2, zero_offset=False,
         c1_threshold_factor=0.01, c2_threshold_factor=0.01):
@@ -73,7 +74,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         c1 = (L - (2*t + c2)*param_n)/(param_n + 1)
         if c1 < c1_threshold:
             c1 = 0
-        #NOTE recalculating t to accomodate cases where
+        #NOTE recalculating t to accommodate cases where
         #     c1 < c1_threshold or c2 < c2_threshold
         t = ((L - c1*(param_n+1))/param_n - c2)/2
 
@@ -340,9 +341,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         lex = elem.lex
         ley = elem.ley
         indices = []
-        #NOTE deliberately not named c1..c4: those name the axial lengths
-        #     of the CTS parameterization in this function and are reported
-        #     in out, which this loop used to overwrite with DOF offsets
+        #NOTE not named c1..c4, which hold the axial lengths of the CTS
+        #     parameterization reported in out
         cs = [DOF*pos1, DOF*pos2, DOF*pos3, DOF*pos4]
         for ci in cs:
             for i in range(DOF):
@@ -368,28 +368,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     u0[bu] = uu
 
-    #NOTE the CTS parameterization used here, dos Santos and Castro,
-    #     Materials, 2022, 15(12), 4117, doi:10.3390/ma15124117, steers the
-    #     tows along the AXIAL direction only, theta = theta(x), and the tow
-    #     shearing thickens the laminate as h_tow/cos(theta), also a function
-    #     of x alone. The laminate is therefore uniform around the
-    #     circumference, exactly as in the constant stiffness models, so the
-    #     fundamental path of the perfect cylinder under uniform axial
-    #     compression is still axisymmetric, and every buckling mode that
-    #     makes the tangent stiffness matrix singular is still not.
-    #     Restricting the pre-buckling solve to the axisymmetric subspace
-    #     therefore keeps it clear of the whole near critical cluster, and not
-    #     only of the few modes that happen to have been computed, which is
-    #     what the Newton-Raphson needs in order to converge at
-    #     lambda_b/lambda_c close to 1. It is also what the reference
-    #     solutions do, AXBIF and ANILISA both solving an axisymmetric
-    #     pre-buckling problem.
-    #
-    #     The restriction applies to the PRE-BUCKLING state alone. The
-    #     eigenvalue problem below is assembled and solved on the FULL space,
-    #     so non-axisymmetric buckling modes are predicted exactly as they
-    #     were before; what the restriction removes is the pre-buckling
-    #     iteration drifting off the fundamental path, not the modes
+    #NOTE the CTS parameterization of dos Santos and Castro, Materials, 2022,
+    #     15(12), 4117, doi:10.3390/ma15124117, steers the tows along x only
+    #     and thickens the laminate as h_tow/cos(theta(x)), so the laminate is
+    #     uniform around the circumference as in the constant stiffness
+    #     models. Solving for the pre-buckling state in the axisymmetric
+    #     subspace then keeps the Newton-Raphson clear of the whole near
+    #     critical cluster up to lambda_b/lambda_c close to 1, as AXBIF and
+    #     ANILISA do. Only the pre-buckling state is restricted, the eigenvalue
+    #     problem being solved on the FULL space. See "Why the axisymmetric
+    #     reduction still applies" in doc/nlprebuck_implementation.tex
     axi_order = mesh_order(x, y, nx, ny)
     #NOTE unlike the constant stiffness models, xlin is not uniformly spaced
     #     here, so the axial stations that mesh_order sorts the nodes into are
@@ -403,7 +391,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         return project_axisymmetric(u, axi_order, axi_imid, DOF)
 
     def solve_axi(KT, rhs):
-        """Solve KT du = rhs for the axisymmetric du, Eq. of the subspace
+        """Solve KT du = rhs for the axisymmetric du
 
         The Galerkin projection onto the axisymmetric basis, and not the full
         solve followed by a projection, for the reason given in
@@ -413,16 +401,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         rr = Baxi.T @ rhs
         a = np.zeros(Baxi.shape[1], dtype=DOUBLE)
         Krf = Kr[np.ix_(buaxi, buaxi)]
-        #NOTE the reduced coordinates are nodal displacements next to nodal
-        #     derivatives, whose stiffness entries differ by orders of
-        #     magnitude, and the reduced matrix reaches a condition number of
-        #     4e12 because of it. The sparse solver used elsewhere
-        #     equilibrates internally, this dense one does not, so it is
-        #     scaled symmetrically here, which brings the condition number
-        #     down to 3e2. Measured on the ny=60 Arbocz and Starnes case it
-        #     leaves every iterate unchanged to ten digits, the graded matrix
-        #     being solved accurately by the pivoting alone; it is kept as a
-        #     guard rather than as a fix
+        #NOTE nodal displacements next to nodal derivatives give the reduced
+        #     matrix a condition number of 4e12, which the symmetric scaling
+        #     brings down to 3e2. The sparse solver used elsewhere
+        #     equilibrates internally, this dense one does not. Iterates are
+        #     unchanged to ten digits on ny=60, so it is a guard, not a fix
         d = 1/np.sqrt(np.abs(Krf.diagonal()))
         a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :], d*rr[buaxi])
         return Baxi @ a
@@ -443,8 +426,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         in a SAVEd variable, so without one the basis it returns for a
         degenerate eigenspace depends on how many eigenvalue problems were
         solved before in the same process. That alone does not pin the basis
-        down, round off inside the eigen solver being enough to rotate it,
-        which is what canonical_modes is for
+        down, round off inside the eigen solver being enough to rotate it, or
+        to return a single member of a pair, which is what canonical_modes is
+        for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
         eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
@@ -474,17 +458,17 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 update_fint(u, elem, points, weights, fint)
             return fint
 
-        # solving using Modified Newton-Raphson method
+        # Newton-Raphson, the tangent updated at every iteration
         def scaling(vec, D):
             """
-                A. Peano and R. Riccioni, Automated discretisatton error
-                control in finite element analysis. In Finite Elements m
-                the Commercial Enviror&ent (Editei by J. 26.  Robinson),
-                pp. 368-387. Robinson & Assoc., Verwood.  England (1978)
+                A. Peano and R. Riccioni, Automated discretisation error
+                control in finite element analysis. In Finite Elements in
+                the Commercial Environment (Edited by J. Robinson),
+                pp. 368-387. Robinson & Assoc., Verwood, England (1978)
             """
             return np.sqrt((vec*np.abs(1/D))@vec)
 
-        D = KC0uu.diagonal() # at beginning of load increment
+        D = KC0uu.diagonal() # fixed for the whole analysis
         epsilon = NR_eps
 
         def solve_prebuckling(lambda_b, ui):
@@ -509,12 +493,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             stall = 0
 
             def give_up(reason):
-                #NOTE close to the bifurcation point the residual of the
-                #     deflated iteration reaches a floor above NR_eps and then
-                #     starts growing again. The best iterate is still a
-                #     perfectly usable equilibrium state whenever that floor
-                #     is below NR_eps_accept, so it is kept instead of
-                #     throwing the load step away
+                #NOTE close to the bifurcation point the residual can reach a
+                #     floor above NR_eps and grow again. The best iterate is
+                #     kept whenever that floor is below NR_eps_accept, rather
+                #     than throwing the load step away
                 if best_test < NR_eps_accept:
                     print('#        %s, keeping the best iterate, '
                             'crisfield_test %r' % (reason, best_test))
@@ -623,24 +605,15 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             #NOTE eta=0.8 in the first iteration to approach the neighbourhood
             #     of the buckling load quickly, eta=0.5 afterwards
             eta = 0.8 if iteration == 1 else 0.5
-            #NOTE Eq. (44) advances lambda_b by a fixed fraction of the
-            #     distance to lambda_c, but lambda_c moves as well, and
-            #     downwards: with s = dlambda_c/dlambda_b the step lands past
-            #     the bifurcation point whenever eta > 1/(1 - s). Capping eta
-            #     at a fraction of that, with s estimated from the two
-            #     previous load steps, keeps it on the near side and makes
-            #     Eq. (44) a secant iteration on lambda_c(lambda_b) -
-            #     lambda_b, which divides the distance by a fixed factor per
-            #     step whatever s is. The ny=60 Arbocz and Starnes mesh
-            #     reaches s = -1.09, where the fixed eta = 0.5 of Eq. (44)
-            #     sits just above the 0.478 that would have been safe.
-            #
-            #     The fraction is 0.7 rather than something closer to one
-            #     because s is estimated backwards and lags while it
-            #     steepens: on that same mesh the step that overshoots is
-            #     taken with s = -0.66 measured over the previous interval,
-            #     against the -1.09 the step itself turns out to have, so a
-            #     margin of about a quarter is needed on 1 - s
+            #NOTE lambda_c falls as lambda_b rises, and with
+            #     s = dlambda_c/dlambda_b the step of Eq. (44) lands past the
+            #     bifurcation point whenever eta > 1/(1 - s); s reaches -1.09
+            #     on the ny=60 Arbocz and Starnes mesh. Capping eta at
+            #     0.7/(1 - s), s from the two previous load steps, makes
+            #     Eq. (44) a secant iteration dividing the distance by a fixed
+            #     factor per step; 0.7 because the backward estimate of s lags
+            #     while it steepens. See "Advancing the load level" in
+            #     doc/nlprebuck_implementation.tex
             if lambda_c_prev is not None and lambda_b != lambda_prev:
                 s = (lambda_c - lambda_c_prev)/(lambda_b - lambda_prev)
                 if s < 0:
@@ -760,34 +733,85 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     es = partial(np.einsum, optimize='greedy', casting='no')
 
-    #NOTE making the maximum amplitude of the eigenmode equal to h
-    #normalizing amplitude of eigenvector according to shell thickness
+    #NOTE the largest nodal translation of every mode made equal to h; the
+    #     reference coefficients use the crest amplitude of w instead, see
+    #     "Normalising the modes" in doc/nlprebuck_implementation.tex
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        #NOTE normalizing as Abaqus does, assuming nonzero translations
         ampl = np.sqrt(ua[modei][0::DOF]**2 + ua[modei][3::DOF]**2 + ua[modei][6::DOF]**2).max()
         ua[modei] /= ampl
         ua[modei] *= havg
 
+    #NOTE the null space of phi2, against which the second order fields are
+    #     constrained, see the bordered system below. The buckling modes of a
+    #     cylinder come in degenerate pairs, so it is spanned by every
+    #     eigenvector whose multiplier equals the critical one AND by the
+    #     partner of each of them, not only by the Koiter modes. Whether the
+    #     eigen solver returns a partner is decided by round off, and one left
+    #     out of the column border is a null vector of the whole bordered
+    #     matrix, so it is rebuilt from the cyclic symmetry when missing
+    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
+    for j in range(num_eigvals):
+        if abs(mu[j] - mu[0]) > 1.e-3*abs(mu[0]):
+            continue
+        cols.append(eigvecsu[:, j])
+        group = [k for k in range(num_eigvals)
+                 if abs(mu[k] - mu[j]) <= 1.e-5*abs(mu[j])]
+        if len(group) == 1:
+            partner = degenerate_partner(eigvecs[:, j], bu, axi_order, DOF)
+            if partner is not None:
+                cols.append(partner[bu])
+    #NOTE the Koiter modes first, then what the other vectors add to them.
+    #     Every eigenvector that is also a Koiter mode is in cols twice, and a
+    #     QR factorization without pivoting would give the round off left of
+    #     the duplicate a column of its own and project the next vector
+    #     against it, so the complement is taken from an SVD instead
+    C = np.asarray(cols).T
+    C = C/np.linalg.norm(C, axis=0)
+    Qm, Rm = np.linalg.qr(C[:, :koiter_num_modes])
+    assert np.abs(np.diag(Rm)).min() > 1.e-6, 'linearly dependent Koiter modes'
+    for _ in range(2):
+        C = C - Qm @ (Qm.T @ C)
+    Uc, sc = np.linalg.svd(C, full_matrices=False)[:2]
+    Nsp = np.hstack((Qm, Uc[:, sc > 1.e-8]))
+    print('# null space of phi2 deflated with %d vectors' % Nsp.shape[1])
+
+    #NOTE the directions along which the orthogonality conditions are
+    #     imposed, one per column of Nsp and spanning the same space: the
+    #     Koiter modes, then the rest of the null space
+    ucond = {}
+    for modek in range(koiter_num_modes):
+        ucond[modek] = ua[modek]
+    for col in range(koiter_num_modes, Nsp.shape[1]):
+        v = np.zeros(N)
+        v[bu] = Nsp[:, col]
+        ucond[col] = v
+    num_cond = len(ucond)
+
     phi4 = defaultdict(lambda: 0)
     phi3_ab = {}
     phi30_ab = {}
+    cst_ab = {}
     phi3e_ab = {}
     phi30e_ab = {}
+    cste_ab = {}
     phi20e_a = {}
     phi20_a = {}
     #phi2 = np.zeros((N, N))
     phi200_ab = {}
-    for modei in range(koiter_num_modes):
+    for modei in range(num_cond):
         phi20_a[modei] = np.zeros(N)
         phi20e_a[modei] = np.zeros(num_nodes*DOF)
+    for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             phi200_ab[(modei, modej)] = 0
             phi3_ab[(modei, modej)] = np.zeros(N)
             phi30_ab[(modei, modej)] = np.zeros(N)
+            cst_ab[(modei, modej)] = np.zeros(N)
             phi3e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
             phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
+            cste_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
 
 
     #NOTE this flag multiplies every nonlinear contribution to the
@@ -830,14 +854,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             u0ddote[2*DOF + i] = u0ddot[c3 + i]
             u0ddote[3*DOF + i] = u0ddot[c4 + i]
 
+        #NOTE the Koiter modes, followed by the remaining directions of the
+        #     null space of phi2, for which only phi20_a is needed
         uae = {}
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             uae[modei] = np.zeros(num_nodes*DOF, dtype=np.float64)
             for i in range(DOF):
-                uae[modei][0*DOF + i] = ua[modei][c1 + i]
-                uae[modei][1*DOF + i] = ua[modei][c2 + i]
-                uae[modei][2*DOF + i] = ua[modei][c3 + i]
-                uae[modei][3*DOF + i] = ua[modei][c4 + i]
+                uae[modei][0*DOF + i] = ucond[modei][c1 + i]
+                uae[modei][1*DOF + i] = ucond[modei][c2 + i]
+                uae[modei][2*DOF + i] = ucond[modei][c3 + i]
+                uae[modei][3*DOF + i] = ucond[modei][c4 + i]
 
         ube = uce = ude = uae
 
@@ -850,11 +876,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         lex = elem.lex
         ley = elem.ley
 
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             phi20e_a[modei] *= 0
+        for modei in range(koiter_num_modes):
             for modej in range(koiter_num_modes):
                 phi3e_ab[(modei, modej)] *= 0
                 phi30e_ab[(modei, modej)] *= 0
+                cste_ab[(modei, modej)] *= 0
 
         #phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
 
@@ -958,7 +986,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                            #+ es('ib,ia->ab', Mib, kia)
                         #)
 
-                for modei in range(koiter_num_modes):
+                for modei in range(num_cond):
                     ua1 = uae[modei]
                     phi20e_a[modei] += 1/2.*weight*(lex*ley/4.)*(
                             (ei0 @ (Niab @ ua1))
@@ -1001,6 +1029,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                             + es('ib,iac,a,b', Nib0, eiac, ua1, ub2)
                             + es('ic,iab,a,b', Nic0, eiab, ua1, ub2)
                             )
+                        #NOTE 1/2 <N[L2(ua, ub)], L11(u0_dot, .)>, the
+                        #     constant of the orthogonality conditions, see
+                        #     the bordered system below. Its integrand equals
+                        #     the first, and the last, of the six terms of
+                        #     phi30e_ab
+                        cste_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
+                              es('iab,ic,a,b', Niab, eic0, ua1, ub2))
 
                 def fphi4(ua, ub, uc, ud):
                     return 1/2.*weight*(lex*ley/4.)*(
@@ -1021,11 +1056,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         #tmp = np.zeros((N, num_nodes*DOF))
         #tmp[indices] = phi2e
         #phi2[:, indices] += tmp
-        for modei in range(koiter_num_modes):
+        for modei in range(num_cond):
             phi20_a[modei][indices] += phi20e_a[modei]
+        for modei in range(koiter_num_modes):
             for modej in range(koiter_num_modes):
                 phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
                 phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
+                cst_ab[(modei, modej)][indices] += cste_ab[(modei, modej)]
 
     #NOTE phi2 must be the SAME operator whose null vector is the buckling
     #     mode, so it is built from the KC and KG of the eigenvalue analysis,
@@ -1052,71 +1089,54 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
                 print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
+    #NOTE the second order fields solve the terms of order xi_a xi_b of the
+    #     equilibrium equations,
+    #         phi2 uab + 1/2 phi3_ab + sum_l z_l phi20_a[l] = 0
+    #     with z_l the coefficient of xi_a xi_b in (lambda - lambda_l) xi_l.
+    #     The same terms projected onto the Koiter modes, along which phi2
+    #     vanishes, are the amplitude equations that give z,
+    #         sum_l Tkl[k, l] z_l = -1/2 phi3_ab @ ua[k]
+    #     with Tkl[k, l] = phi20_a[k] @ ua[l], so the right hand side is
+    #     orthogonal to every Koiter mode and the column border of the
+    #     bordered system below has nothing to absorb. For T-orthogonal modes
+    #     z_l = lambda_l a_lab; on a cylinder phi3_ab @ ua[k] vanishes and this
+    #     matters only for an asymmetric bifurcation. See "The singular
+    #     system" in doc/nlprebuck_implementation.tex
+    Tkl = np.array([[phi20_a[modek] @ ua[model]
+                     for model in range(koiter_num_modes)]
+                    for modek in range(koiter_num_modes)])
     force2ndorder_ij = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
             #NOTE phi3_ij = phi3_ji even in the asym case
             force2ndorder_ij[(modei, modej)] = -1/2.*phi3_ab[(modei, modej)]
-            #NOTE the a_ijk contribution below is kept. For the symmetric
-            #     bifurcation of a cylinder under axial compression a_ijk is
-            #     zero to within round off, of the order of 1e-5 against a
-            #     b_ijkl of order 1, so it changes nothing here; it matters
-            #     only for an asymmetric bifurcation
-            for modek in range(koiter_num_modes):
-                lambda_k = lambda_a[modek]
-                a_kij = a_abc[(modek, modei, modej)]
-                force2ndorder_ij[(modei, modej)] += (
-                        - (1/koiter_num_modes)*a_kij*lambda_k*phi20_a[modek]
-                        )
+            z = np.linalg.solve(Tkl, [-1/2.*(phi3_ab[(modei, modej)] @ ua[modek])
+                                      for modek in range(koiter_num_modes)])
+            for model in range(koiter_num_modes):
+                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]
 
-    #NOTE phi2 is singular by construction, the buckling modes span its null
-    #     space, so the second order fields cannot be obtained from a plain
-    #     spsolve followed by a Gram-Schmidt projection. They come from the
-    #     bordered system
+    #NOTE phi2 is singular by construction, the buckling modes spanning its
+    #     null space, so the second order fields come from the bordered system
     #         [phi2  Nsp] [uab  ]   [force2ndorder]
     #         [W^T   0  ] [alpha] = [    -cst     ]
-    #     whose column border Nsp spans the null space of phi2, which makes it
-    #     non singular, and whose row border W carries the orthogonality
-    #     conditions imposed on the second order fields.
-    #
-    #     Those conditions are the ones of Sun et al. Eq. (18), in finite
-    #     element form Eq. (33),
-    #         q_k^T [KD(qb, qb_dot) + KG(sigma_b_dot)] uab
-    #             + 1/2 q_k^T BNL^T(q_k) H BNL(q_k) qb_dot = 0
-    #     The first term is the load parameter derivative of phi2 contracted
-    #     with mode k on one slot, which is exactly phi20_a[k], and the second
-    #     is a constant, so the condition is weighted by the stiffness
-    #     matrices and inhomogeneous. A Gram-Schmidt projection, or an
-    #     Euclidean border Q^T uab = 0, imposes neither
+    #     whose column border Nsp spans that null space, which makes it non
+    #     singular, and whose row border W imposes along every direction q_k
+    #     of the null space the orthogonality condition of Sun et al.
+    #     Eq. (33), generalized to distinct indices a, b,
+    #         phi20_a[k] @ uab = -cst_ab[(a, b)] @ q_k
+    #                          = -1/2 <N[L2(ua, ub)], L11(u0_dot, q_k)>
+    #     It is weighted by the stiffness matrices and inhomogeneous, which
+    #     neither a Gram-Schmidt projection nor an Euclidean border is. Its
+    #     constant is symmetric in a and b but not in k, and equals
+    #     phi30_ab @ q_k/6, the average over the three slots, only when a, b
+    #     and k coincide. Along the directions outside the Koiter modes it
+    #     keeps the second order field from bringing back amplitude the
+    #     expansion gave zero. See "Second-order fields and the orthogonality
+    #     condition" in doc/nlprebuck_implementation.tex
     nu = int(bu.sum())
-
-    #NOTE the buckling modes of a cylinder come in degenerate pairs, one for
-    #     each sign of the circumferential wave number, so the null space of
-    #     phi2 is spanned by every eigenvector whose multiplier equals the
-    #     critical one, not only by the Koiter modes
-    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
-    for j in range(num_eigvals):
-        if abs(mu[j] - mu[0]) <= 1.e-3*abs(mu[0]):
-            cols.append(eigvecsu[:, j])
-    Qo, r = np.linalg.qr(np.asarray(cols).T)
-    keep = np.abs(np.diag(r)) > 1.e-10*np.abs(np.diag(r)).max()
-    Nsp = Qo[:, keep]
-    print('# null space of phi2 deflated with %d vectors' % Nsp.shape[1])
-
-    #NOTE one row of Eq. (33) per Koiter mode. Whatever is left of the null
-    #     space, the degenerate partners of those modes, is outside the single
-    #     mode theory and keeps the Euclidean condition
-    W = np.zeros_like(Nsp)
-    for modek in range(koiter_num_modes):
+    W = np.zeros((nu, num_cond))
+    for modek in range(num_cond):
         W[:, modek] = phi20_a[modek][bu]
-    extra = Nsp.shape[1] - koiter_num_modes
-    if extra > 0:
-        P = Nsp.copy()
-        for modek in range(koiter_num_modes):
-            v = ua[modek][bu]
-            P = P - np.outer(v, v @ P)/(v @ v)
-        W[:, koiter_num_modes:] = np.linalg.svd(
-                P, full_matrices=False)[0][:, :extra]
 
     bordered = bmat([[phi2uu, csc_matrix(Nsp)],
                      [csc_matrix(W).T, None]], format='csc')
@@ -1124,21 +1144,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
-            rhs = np.zeros(nu + Nsp.shape[1])
+            rhs = np.zeros(nu + num_cond)
             rhs[:nu] = force2ndorder_ij[(modei, modej)][bu]
-            for modek in range(koiter_num_modes):
-                #NOTE the constant of Eq. (33). With every mode index equal,
-                #     the six contributions summed into phi30_ab coincide, so
-                #     that with the 1/2 carried by the quadrature weight
-                #     phi30_ab @ ua is three times
-                #     <N[L2(u1)], L11(u0_dot, u1)>, and Eq. (33) takes one
-                #     half of it
-                #TODO for koiter_num_modes > 1 the symmetrization of phi30
-                #     over distinct modes still has to be worked out, the
-                #     expression below is only exact when modei, modej and
-                #     modek coincide
-                rhs[nu + modek] = -(phi30_ab[(modei, modej)]
-                        @ ua[modek])/6.
+            for modek in range(num_cond):
+                rhs[nu + modek] = -(cst_ab[(modei, modej)] @ ucond[modek])
             sol = spsolve(bordered, rhs)
             uijbar = np.zeros(N)
             uijbar[bu] = sol[:nu]
@@ -1178,6 +1187,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         u0=u0,
         ui=ua,
         uij=uab,
+        u0dot=u0dot,
+        ucond=ucond,
             )
     out['koiter'] = koiter
 
