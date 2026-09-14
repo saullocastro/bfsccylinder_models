@@ -63,9 +63,9 @@ for ny, nxt in MESHES:
                param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
                num_eigvals=4, koiter_num_modes=1, Nxxunit=1.,
                idealistic_CTS=True, NLprebuck=NLprebuck,
-               #NOTE the default 12 is a constant-stiffness figure and is
-               #     exhausted by this design: the ny=45 run stops at
-               #     lambda_b/lambda_c = 0.9933 with a WARNING
+               #NOTE the default since 12 was exhausted by this design, the
+               #     ny=45 run stopping at lambda_b/lambda_c = 0.9933; kept
+               #     explicit so that the run does not depend on the default
                NLprebuck_maxiter=30)
     dt = time.time() - t0
 

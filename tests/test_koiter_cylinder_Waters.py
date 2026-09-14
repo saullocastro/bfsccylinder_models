@@ -20,7 +20,7 @@ def test_Waters_shell():
     G12 = 6.00257e9 # Pa
     nu12 = 0.300235
     rho = 1611 # kg/m3
-    stack = [45, -45, 0, 90, 90, 0, -45, 45] #NOTE there is no different in inverting +- 45, significant different inverting 0 and 90 plies
+    stack = [45, -45, 0, 90, 90, 0, -45, 45] #NOTE swapping +45 and -45 makes no difference, swapping 0 and 90 a significant one
     plyt = 0.00012692375 # m
     h = plyt*len(stack)
 

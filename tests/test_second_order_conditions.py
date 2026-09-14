@@ -184,10 +184,35 @@ def _generic(canonical_modes):
     return modes
 
 
+def _one_member_per_pair(eigsh):
+    """The eigen solver, returning a single member of every degenerate pair
+
+    Whether ARPACK returns both members of a degenerate pair, or one member
+    and then the next multiplier, is decided by round off, and it changed
+    between CI runs of the same code. With both members of the critical pair
+    as the two Koiter modes, the null space of phi2 is spanned by the Koiter
+    modes alone and there is no direction beyond them to check. The partner
+    that was not returned, which is the case the column border is built for,
+    is therefore made the case tested here, by asking for more eigenpairs and
+    keeping the first of every multiplier
+    """
+    def solve(A, k, M, **kwargs):
+        eigvals, eigvecs = eigsh(A=A, k=2*k, M=M, **kwargs)
+        mu = -1/eigvals
+        keep = []
+        for j in range(eigvals.shape[0]):
+            if not any(abs(mu[j] - mu[i]) <= 1e-5*abs(mu[i]) for i in keep):
+                keep.append(j)
+        keep = keep[:k]
+        return eigvals[keep], eigvecs[:, keep]
+    return solve
+
+
 @pytest.mark.parametrize('kinematics', list(KINEMATICS))
 def test_conditions_hold_along_every_direction_of_the_null_space(
         kinematics, monkeypatch):
     model, lib, element, sanders = KINEMATICS[kinematics]
+    monkeypatch.setattr(model, 'eigsh', _one_member_per_pair(model.eigsh))
     monkeypatch.setattr(model, 'canonical_modes',
                         _generic(model.canonical_modes))
     solves = []
@@ -205,11 +230,10 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     nu = int(bu.sum())
 
     #NOTE the right hand side of every second order field is orthogonal to
-    #     the Koiter modes, which is what the amplitude equations make it,
-    #     with modes that are not orthogonal with respect to
-    #     T_kl = phi20_k . u_l, the case in which lambda_l a_lij in place of
-    #     the solution of T z = -1/2 phi3_ij . u_k would not do. The bordered
-    #     solves are the last m*m of the model
+    #     the Koiter modes, as the amplitude equations T z = -1/2 phi3_ij . u_k
+    #     make it, with modes that are not T-orthogonal, T_kl = phi20_k . u_l,
+    #     where lambda_l a_lij in place of z would not do. The bordered solves
+    #     are the last m*m of the model
     U = np.column_stack([koiter['ui'][k][bu] for k in range(m)])
     A, _ = solves[-1]
     W = A[nu:nu + m, :nu].toarray()
@@ -219,8 +243,8 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
         assert A.shape[0] == nu + len(koiter['ucond'])
         g = b[:nu]
         assert np.abs(U.T @ g).max() <= 1e-9*np.linalg.norm(U, axis=0).max()*np.linalg.norm(g)
-    #NOTE more directions than Koiter modes, so that the rows beyond the
-    #     Koiter modes, which used to carry an Euclidean condition, are checked
+    #NOTE more directions than Koiter modes, so that the rows beyond them are
+    #     checked too
     assert len(koiter['ucond']) > koiter['koiter_num_modes']
 
     prop = _prop()
@@ -244,9 +268,10 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     assert max(abs(c) for c in cst.values()) > 1e-3*max(firsts)
 
 
-def test_column_border_contains_the_degenerate_partner():
-    """The eigen solver does not return the partner on this mesh, which is
-    the case the column border used to miss"""
+def test_column_border_contains_the_degenerate_partner(monkeypatch):
+    """The eigen solver does not return the partner, which is the case the
+    column border used to miss"""
+    monkeypatch.setattr(sa_model, 'eigsh', _one_member_per_pair(sa_model.eigsh))
     out = _run(sa_model, ny=30, num_eigvals=2, koiter_num_modes=1)
     mu = out['mu']
     assert not np.isclose(mu[0], mu[1], rtol=1e-5), (
@@ -267,5 +292,6 @@ if __name__ == '__main__':
     for kin in KINEMATICS:
         test_conditions_hold_along_every_direction_of_the_null_space(kin, mp)
         mp.undo()
-    test_column_border_contains_the_degenerate_partner()
+    test_column_border_contains_the_degenerate_partner(mp)
+    mp.undo()
     print('ok')

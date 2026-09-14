@@ -14,7 +14,8 @@ normalizes it (largest nodal translation equal to h):
   harmonic k; the second order field carries the harmonics 0 and 2n, and a
   multiplier of those close to the critical one would amplify it
 
-Reported in: Section "The gap to ANILISA" and Section "Fixing the member".
+Reported in: Sections "The modes come in degenerate pairs", "Normalising the
+modes" and "The gap to ANILISA".
 Runtime: from 2 min (ny=60, nx=25) to 25 min (ny=120, nx=51) per run on an
 unloaded machine. Every run is independent, so the configurations are given
 on the command line and can be run in parallel:

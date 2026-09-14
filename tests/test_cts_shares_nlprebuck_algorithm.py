@@ -1,8 +1,8 @@
 """The CTS models must carry the SAME NLprebuck algorithm as the
-newton_raphson models.
+constant-stiffness models.
 
-The algorithm was spliced from koiter_cylinder_newton_raphson*.py into
-koiter_cylinder_CTS*.py rather than retyped, so that the two model families
+The algorithm was spliced from koiter_cylinder.py and koiter_cylinder_sanders.py
+into koiter_cylinder_CTS*.py rather than retyped, so that the two model families
 cannot drift apart. This test asserts that character for character, on the
 regions that are meant to be shared: the axisymmetric pre-buckling solver and
 the iterative eigenvalue algorithm, the flag note, the pre-buckling state and

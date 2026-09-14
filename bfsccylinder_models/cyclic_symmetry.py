@@ -36,17 +36,9 @@ def axisymmetric_basis(axi_order, bu, DOF):
 
     The two give the same iterates here, to eleven digits on the meshes of
     the test suite, so this is a simplification and a saving rather than a
-    correction.
-
-    It is in particular not what made the Newton-Raphson converge. Until
-    bfsccylinder 0.6.0 the tangent stiffness matrix was not the derivative of
-    the internal force vector, a directional Taylor test of
-    KC0 + KCNL(u) + KG(u) against fint plateauing at a relative error of
-    1.4e-3 instead of falling with the step, which left the iteration an
-    inexact Newton one contracting by about 0.3 per iteration at ny=40 and by
-    0.95 at ny=60, where it exhausted NR_maxiter at every load step. With the
-    consistent tangent of 0.6.0 the same load steps take a single iteration
-    each and ny=60 converges in four of them.
+    correction. Nor is it what made the Newton-Raphson converge on fine
+    meshes, which was the consistent tangent stiffness matrix of
+    bfsccylinder 0.6.0.
 
     Returns the basis and the boolean mask of its unknown coordinates. A
     reduced coordinate is known as soon as one of the nodes it spans is
@@ -166,42 +158,22 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     The buckling modes of a cylinder come in degenerate pairs, one for each
     sign of the circumferential wave number, and every rotation of a pair is
     again a pair of buckling modes. Which member of it comes out of the eigen
-    solver is decided by round off, so it changes with the BLAS
-    implementation, and b_ijkl is not invariant under that rotation. Measured
-    on the ny = 40 meshes of the test suite, both buckling with n = 10,
-    rotating the critical pair by 30 degrees moves b_1111 from -0.230556 to
-    -0.192752 on the Sun et al. case and from -0.335975 to -0.260672 on the
-    Arbocz and Starnes case, with the pre-buckling state and the buckling
-    load unchanged to eleven digits.
-
-    Almost all of that is the normalization of the mode by its largest NODAL
-    translation, and not the resolution of the harmonic 2n of the second
-    order field. The modes of these anisotropic laminates are skewed, their
-    crest drifting around the circumference along the axis, and the largest
-    nodal value equals the crest amplitude only where the crest falls on a
-    node. Normalized by the crest amplitude instead, the envelope of the pair,
-    the same rotation moves b_1111 by 2.9% and 1.1%. What remains is the
-    discrete symmetry: up to the normalization, b_1111 over a pair that the
-    shift by one element rotates by 2*pi*n/ny can depend on the rotation only
-    through its fourth harmonic, and only when 4n is a multiple of ny, which
-    both ny = 40 meshes are. On the ny = 60 Arbocz and Starnes mesh, n = 11,
-    the crest normalized b_1111 of the canonical member and of the member
-    rotated by 30 degrees agree to six digits.
-
-    Each pair is therefore rotated to the member whose crest falls on the
-    y = 0 generator, a property of the mesh and not of the arithmetic. That
-    makes b_ijkl reproducible; it does not make it mesh converged, nor free of
-    the error of sampling a skewed crest at the nodes.
+    solver is decided by round off, and b_ijkl is not invariant under that
+    rotation: on the ny = 40 meshes of the test suite a rotation by 30 degrees
+    moves b_1111 by 16% on the Sun et al. case and by 22% on the Arbocz and
+    Starnes case, almost all of it through the normalization of the mode by
+    its largest nodal translation, which misses the crest of these skewed
+    modes. Each pair is therefore rotated to the member whose crest falls on
+    the y = 0 generator, a property of the mesh and not of the arithmetic.
+    That makes b_ijkl reproducible; it does not make it mesh converged.
 
     The partner of a mode need not be among the ones the eigen solver
-    returned. A Krylov method builds its subspace from a single starting
-    vector, so it finds one direction of a degenerate eigenspace and then
-    moves on to the next multiplier: asking scipy for the two lowest
-    multipliers of the Arbocz and Starnes cylinder of the test suite returns
-    one member of the critical pair and one member of the next pair, 3.3e-4
-    away. A missing partner is recovered here through :func:`rotated`, the
-    cyclic symmetry of the mesh making the rotation of a mode another mode of
-    the same pair.
+    returned either: whether ARPACK returns both members of a pair, or one
+    member and then the next multiplier, is decided by round off too. A
+    missing partner is recovered here through :func:`rotated`, the cyclic
+    symmetry of the mesh making the rotation of a mode another mode of the
+    same pair. See Section "Buckling modes of a cylinder" of
+    doc/nlprebuck_implementation.tex for the measurements.
 
     Parameters
     ----------

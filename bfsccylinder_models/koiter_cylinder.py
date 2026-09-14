@@ -25,7 +25,7 @@ num_nodes = 4
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
-        NLprebuck_eps1=0.005, NLprebuck_maxiter=12, NR_maxiter=40,
+        NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
         NR_eps=1.e-4, NR_eps_accept=1.e-3):
 
     circ = 2*np.pi*R
@@ -187,14 +187,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     u0[bu] = uu
 
     #NOTE the fundamental path of a perfect cylinder under uniform axial
-    #     compression is axisymmetric, and every buckling mode that makes the
-    #     tangent stiffness matrix singular is not. Restricting the
-    #     pre-buckling solve to the axisymmetric subspace therefore keeps it
-    #     clear of the whole near critical cluster, and not only of the few
-    #     modes that happen to have been computed, which is what the
-    #     Newton-Raphson needs in order to converge at lambda_b/lambda_c close
-    #     to 1. It is also what the reference solutions do, AXBIF and ANILISA
-    #     both solving an axisymmetric pre-buckling problem
+    #     compression is axisymmetric and the buckling modes are not, so
+    #     solving for the pre-buckling state in the axisymmetric subspace keeps
+    #     the Newton-Raphson clear of the whole near critical cluster up to
+    #     lambda_b/lambda_c close to 1, as AXBIF and ANILISA do
     axi_order = mesh_order(x, y, nx, ny)
     axi_imid = np.argmin(np.abs(xlin - L/2.))
 
@@ -204,7 +200,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         return project_axisymmetric(u, axi_order, axi_imid, DOF)
 
     def solve_axi(KT, rhs):
-        """Solve KT du = rhs for the axisymmetric du, Eq. of the subspace
+        """Solve KT du = rhs for the axisymmetric du
 
         The Galerkin projection onto the axisymmetric basis, and not the full
         solve followed by a projection, for the reason given in
@@ -214,16 +210,11 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         rr = Baxi.T @ rhs
         a = np.zeros(Baxi.shape[1], dtype=DOUBLE)
         Krf = Kr[np.ix_(buaxi, buaxi)]
-        #NOTE the reduced coordinates are nodal displacements next to nodal
-        #     derivatives, whose stiffness entries differ by orders of
-        #     magnitude, and the reduced matrix reaches a condition number of
-        #     4e12 because of it. The sparse solver used elsewhere
-        #     equilibrates internally, this dense one does not, so it is
-        #     scaled symmetrically here, which brings the condition number
-        #     down to 3e2. Measured on the ny=60 Arbocz and Starnes case it
-        #     leaves every iterate unchanged to ten digits, the graded matrix
-        #     being solved accurately by the pivoting alone; it is kept as a
-        #     guard rather than as a fix
+        #NOTE nodal displacements next to nodal derivatives give the reduced
+        #     matrix a condition number of 4e12, which the symmetric scaling
+        #     brings down to 3e2. The sparse solver used elsewhere
+        #     equilibrates internally, this dense one does not. Iterates are
+        #     unchanged to ten digits on ny=60, so it is a guard, not a fix
         d = 1/np.sqrt(np.abs(Krf.diagonal()))
         a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :], d*rr[buaxi])
         return Baxi @ a
@@ -244,8 +235,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         in a SAVEd variable, so without one the basis it returns for a
         degenerate eigenspace depends on how many eigenvalue problems were
         solved before in the same process. That alone does not pin the basis
-        down, round off inside the eigen solver being enough to rotate it,
-        which is what canonical_modes is for
+        down, round off inside the eigen solver being enough to rotate it, or
+        to return a single member of a pair, which is what canonical_modes is
+        for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
         eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
@@ -275,17 +267,17 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 update_fint(u, elem, points, weights, fint)
             return fint
 
-        # solving using Modified Newton-Raphson method
+        # Newton-Raphson, the tangent updated at every iteration
         def scaling(vec, D):
             """
-                A. Peano and R. Riccioni, Automated discretisatton error
-                control in finite element analysis. In Finite Elements m
-                the Commercial Enviror&ent (Editei by J. 26.  Robinson),
-                pp. 368-387. Robinson & Assoc., Verwood.  England (1978)
+                A. Peano and R. Riccioni, Automated discretisation error
+                control in finite element analysis. In Finite Elements in
+                the Commercial Environment (Edited by J. Robinson),
+                pp. 368-387. Robinson & Assoc., Verwood, England (1978)
             """
             return np.sqrt((vec*np.abs(1/D))@vec)
 
-        D = KC0uu.diagonal() # at beginning of load increment
+        D = KC0uu.diagonal() # fixed for the whole analysis
         epsilon = NR_eps
 
         def solve_prebuckling(lambda_b, ui):
@@ -310,12 +302,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             stall = 0
 
             def give_up(reason):
-                #NOTE close to the bifurcation point the residual of the
-                #     deflated iteration reaches a floor above NR_eps and then
-                #     starts growing again. The best iterate is still a
-                #     perfectly usable equilibrium state whenever that floor
-                #     is below NR_eps_accept, so it is kept instead of
-                #     throwing the load step away
+                #NOTE close to the bifurcation point the residual can reach a
+                #     floor above NR_eps and grow again. The best iterate is
+                #     kept whenever that floor is below NR_eps_accept, rather
+                #     than throwing the load step away
                 if best_test < NR_eps_accept:
                     print('#        %s, keeping the best iterate, '
                             'crisfield_test %r' % (reason, best_test))
@@ -424,24 +414,15 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             #NOTE eta=0.8 in the first iteration to approach the neighbourhood
             #     of the buckling load quickly, eta=0.5 afterwards
             eta = 0.8 if iteration == 1 else 0.5
-            #NOTE Eq. (44) advances lambda_b by a fixed fraction of the
-            #     distance to lambda_c, but lambda_c moves as well, and
-            #     downwards: with s = dlambda_c/dlambda_b the step lands past
-            #     the bifurcation point whenever eta > 1/(1 - s). Capping eta
-            #     at a fraction of that, with s estimated from the two
-            #     previous load steps, keeps it on the near side and makes
-            #     Eq. (44) a secant iteration on lambda_c(lambda_b) -
-            #     lambda_b, which divides the distance by a fixed factor per
-            #     step whatever s is. The ny=60 Arbocz and Starnes mesh
-            #     reaches s = -1.09, where the fixed eta = 0.5 of Eq. (44)
-            #     sits just above the 0.478 that would have been safe.
-            #
-            #     The fraction is 0.7 rather than something closer to one
-            #     because s is estimated backwards and lags while it
-            #     steepens: on that same mesh the step that overshoots is
-            #     taken with s = -0.66 measured over the previous interval,
-            #     against the -1.09 the step itself turns out to have, so a
-            #     margin of about a quarter is needed on 1 - s
+            #NOTE lambda_c falls as lambda_b rises, and with
+            #     s = dlambda_c/dlambda_b the step of Eq. (44) lands past the
+            #     bifurcation point whenever eta > 1/(1 - s); s reaches -1.09
+            #     on the ny=60 Arbocz and Starnes mesh. Capping eta at
+            #     0.7/(1 - s), s from the two previous load steps, makes
+            #     Eq. (44) a secant iteration dividing the distance by a fixed
+            #     factor per step; 0.7 because the backward estimate of s lags
+            #     while it steepens. See "Advancing the load level" in
+            #     doc/nlprebuck_implementation.tex
             if lambda_c_prev is not None and lambda_b != lambda_prev:
                 s = (lambda_c - lambda_c_prev)/(lambda_b - lambda_prev)
                 if s < 0:
@@ -555,32 +536,24 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #from opt_einsum import contract
     #es = partial(contract)
 
-    #NOTE making the maximum amplitude of the eigenmode equal to h
-    #normalizing amplitude of eigenvector according to shell thickness
+    #NOTE the largest nodal translation of every mode made equal to h; the
+    #     reference coefficients use the crest amplitude of w instead, see
+    #     "Normalising the modes" in doc/nlprebuck_implementation.tex
     ua = {}
     for modei in range(koiter_num_modes):
         ua[modei] = eigvecs[:, modei].copy()
-        #NOTE normalizing as Abaqus does, assuming nonzero translations
         ampl = np.sqrt(ua[modei][0::DOF]**2 + ua[modei][3::DOF]**2 + ua[modei][6::DOF]**2).max()
-        #NOTE using ampl = np.linalg.norm(ua[modei]) does not work
         ua[modei] /= ampl
         ua[modei] *= havg
 
     #NOTE the null space of phi2, against which the second order fields are
     #     constrained, see the bordered system below. The buckling modes of a
-    #     cylinder come in degenerate pairs, one for each sign of the
-    #     circumferential wave number, so it is spanned by every eigenvector
-    #     whose multiplier equals the critical one AND by the partner of each
-    #     of them, and not only by the Koiter modes.
-    #
-    #     The partner need not be among the eigenvectors. A Krylov method
-    #     finds one direction of a degenerate eigenspace and moves on to the
-    #     next multiplier, and on the meshes of the test suite asking for two
-    #     to four multipliers returns no partner at all. Left out of the
-    #     column border, the partner is a null vector of the whole bordered
-    #     matrix, the row of the critical mode being blind to it by symmetry,
-    #     so it is rebuilt from the cyclic symmetry, as canonical_modes does,
-    #     whenever the eigen solver did not return it
+    #     cylinder come in degenerate pairs, so it is spanned by every
+    #     eigenvector whose multiplier equals the critical one AND by the
+    #     partner of each of them, not only by the Koiter modes. Whether the
+    #     eigen solver returns a partner is decided by round off, and one left
+    #     out of the column border is a null vector of the whole bordered
+    #     matrix, so it is rebuilt from the cyclic symmetry when missing
     cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
     for j in range(num_eigvals):
         if abs(mu[j] - mu[0]) > 1.e-3*abs(mu[0]):
@@ -850,12 +823,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                             + es('ic,iab,a,b', Nic0, eiab, ua1, ub2)
                             )
                         #NOTE 1/2 <N[L2(ua, ub)], L11(u0_dot, .)>, the
-                        #     constant of the orthogonality condition, see the
-                        #     bordered system below. Its integrand is the
-                        #     first, and the last, of the six terms of
-                        #     phi30e_ab, which as a whole is symmetric in all
-                        #     three slots while this is symmetric in a and b
-                        #     only
+                        #     constant of the orthogonality conditions, see
+                        #     the bordered system below. Its integrand equals
+                        #     the first, and the last, of the six terms of
+                        #     phi30e_ab
                         cste_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
                               es('iab,ic,a,b', Niab, eic0, ua1, ub2))
 
@@ -914,29 +885,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #NOTE the second order fields solve the terms of order xi_a xi_b of the
     #     equilibrium equations,
     #         phi2 uab + 1/2 phi3_ab + sum_l z_l phi20_a[l] = 0
-    #     in which z_l is the coefficient of xi_a xi_b in
-    #     (lambda - lambda_l) xi_l, the load term of mode l. The same terms
-    #     projected onto the Koiter modes, along which phi2 vanishes, are the
-    #     amplitude equations that give it,
+    #     with z_l the coefficient of xi_a xi_b in (lambda - lambda_l) xi_l.
+    #     The same terms projected onto the Koiter modes, along which phi2
+    #     vanishes, are the amplitude equations that give z,
     #         sum_l Tkl[k, l] z_l = -1/2 phi3_ab @ ua[k]
-    #     with Tkl[k, l] = phi20_a[k] @ ua[l], so that the right hand side
-    #         -1/2 phi3_ab - sum_l z_l phi20_a[l]
-    #     is orthogonal to every Koiter mode, which is what makes the
-    #     equation solvable with a right hand side that the column border of
-    #     the bordered system below does not have to correct.
-    #
-    #     For modes orthogonal with respect to Tkl, z_l = lambda_l a_lab,
-    #     the substitution lambda - lambda_c = lambda_c a xi of the single
-    #     mode expansion. The factor 1/koiter_num_modes that term used to
-    #     carry left the right hand side orthogonal to the modes for a single
-    #     mode only, and the column border then absorbed the remainder along
-    #     the modes themselves rather than along phi20_a, which is not the
-    #     same field.
-    #
-    #     For the symmetric bifurcation of a cylinder under axial compression
-    #     phi3_ab @ ua[k] vanishes to within round off, a_ijk being of the
-    #     order of 1e-5 against a b_ijkl of order 1, so this changes nothing
-    #     here; it matters only for an asymmetric bifurcation
+    #     with Tkl[k, l] = phi20_a[k] @ ua[l], so the right hand side is
+    #     orthogonal to every Koiter mode and the column border of the
+    #     bordered system below has nothing to absorb. For T-orthogonal modes
+    #     z_l = lambda_l a_lab; on a cylinder phi3_ab @ ua[k] vanishes and this
+    #     matters only for an asymmetric bifurcation. See "The singular
+    #     system" in doc/nlprebuck_implementation.tex
     Tkl = np.array([[phi20_a[modek] @ ua[model]
                      for model in range(koiter_num_modes)]
                     for modek in range(koiter_num_modes)])
@@ -950,48 +908,24 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             for model in range(koiter_num_modes):
                 force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]
 
-    #NOTE phi2 is singular by construction, the buckling modes span its null
-    #     space, so the second order fields cannot be obtained from a plain
-    #     spsolve followed by a Gram-Schmidt projection. They come from the
-    #     bordered system
+    #NOTE phi2 is singular by construction, the buckling modes spanning its
+    #     null space, so the second order fields come from the bordered system
     #         [phi2  Nsp] [uab  ]   [force2ndorder]
     #         [W^T   0  ] [alpha] = [    -cst     ]
-    #     whose column border Nsp spans the null space of phi2, which makes it
-    #     non singular, and whose row border W carries the orthogonality
-    #     conditions imposed on the second order fields.
-    #
-    #     Those conditions are the ones of Sun et al. Eq. (18), in finite
-    #     element form Eq. (33),
-    #         q_k^T [KD(qb, qb_dot) + KG(sigma_b_dot)] uab
-    #             + 1/2 q_k^T BNL^T(q_k) H BNL(q_k) qb_dot = 0
-    #     The first term is the load parameter derivative of phi2 contracted
-    #     with mode k on one slot, which is exactly phi20_a[k], and the second
-    #     is a constant, so the condition is weighted by the stiffness
-    #     matrices and inhomogeneous. A Gram-Schmidt projection, or an
-    #     Euclidean border Q^T uab = 0, imposes neither.
-    #
-    #     Eq. (33) is written for one mode. Its constant is the contribution
-    #     of the quadratic part of the second order stress,
-    #         sigma_ab = H [L1(uab) + L11(u0, uab) + 1/2 L2(ua, ub)],
-    #     to the functional
-    #         sigma0_dot.L11(q_k, uab) + sigma_k.L11(u0_dot, uab)
-    #             + sigma_ab.L11(u0_dot, q_k)
-    #     whose other terms add up to phi20_a[k] @ uab. With distinct indices
-    #     it is therefore
-    #         1/2 <N[L2(ua, ub)], L11(u0_dot, q_k)> = cst_ab[(a, b)] @ q_k
-    #     which is symmetric in a and b but not in k. phi30_ab @ q_k/6 is the
-    #     average of that over the three slots, and equals it only when a, b
-    #     and k coincide, which is the case Eq. (33) covers.
-    #
-    #     The condition is imposed along every direction of the null space of
-    #     phi2, and not only along the Koiter modes. An expansion that retains
-    #     part of a degenerate eigenspace gives the rest of it zero amplitude,
-    #     and the second order field must not bring any back, as measured by
-    #     that same functional, so the directions outside the retained modes
-    #     get the weighted, inhomogeneous condition rather than an Euclidean
-    #     one. For a single mode expansion of a cylinder the two coincide, the
-    #     harmonic content of the partner being disjoint from that of uab;
-    #     that is a property of the cylinder, not of the expansion
+    #     whose column border Nsp spans that null space, which makes it non
+    #     singular, and whose row border W imposes along every direction q_k
+    #     of the null space the orthogonality condition of Sun et al.
+    #     Eq. (33), generalized to distinct indices a, b,
+    #         phi20_a[k] @ uab = -cst_ab[(a, b)] @ q_k
+    #                          = -1/2 <N[L2(ua, ub)], L11(u0_dot, q_k)>
+    #     It is weighted by the stiffness matrices and inhomogeneous, which
+    #     neither a Gram-Schmidt projection nor an Euclidean border is. Its
+    #     constant is symmetric in a and b but not in k, and equals
+    #     phi30_ab @ q_k/6, the average over the three slots, only when a, b
+    #     and k coincide. Along the directions outside the Koiter modes it
+    #     keeps the second order field from bringing back amplitude the
+    #     expansion gave zero. See "Second-order fields and the orthogonality
+    #     condition" in doc/nlprebuck_implementation.tex
     nu = int(bu.sum())
     W = np.zeros((nu, num_cond))
     for modek in range(num_cond):
