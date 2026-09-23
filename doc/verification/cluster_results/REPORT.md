@@ -51,9 +51,12 @@ The last row is the ny=40 setup check.
   0.7 s in `generate_qsubs.py`, 42× less. The element loop is now 8–11% of
   the Koiter time at ny=160. The rest is almost all the bordered solves
   (PARDISO LU + GMRES).
-- **Pcr and b_0000:** both match the single-mode values in
-  `DOE09_convergence.txt` at ny=160, case 0. NL: 3872.2235 N, −0.235286.
-  LIN: 4549.5270 N, 0.276011.
+- **Pcr and b_0000:** compared with the 0.3.2 runs of the convergence study
+  at ny=160, case 0 (`DOE09_convergence.txt`). Pcr matches to 1.1e-13 (NL)
+  and 1.5e-14 (LIN). b_0000 agrees to 2.2e-5 (NL: −0.2352861 old, −0.2352912
+  new) and 1.5e-6 (LIN). That comparison is not like for like: the old runs
+  used 1 Koiter mode and 4 eigenvalues. u_00 is constrained to be orthogonal
+  to all m modes, so b_0000 depends on m.
 - **The two time measures:** for case 0 NL, t(m=5) − t(m=0) (20.8 ms/element)
   exceeds the direct measurement (16.8 ms/element). The non-Koiter part of the
   m=5 run took 1295 s, against 1192 s for the m=0 run, although both do the
@@ -66,7 +69,22 @@ The last row is the ny=40 setup check.
 
 ### Baseline comparison
 
-Pending: `base_m5`, case 0, NL, ny=160 (job 1032514) is still running (5+ h expected).
+Not run to completion. The optional `base_m5` run, case 0, NL, ny=160 (job
+1032514), was cancelled after 4 h 39 min. The old element loop ran at about
+2.0 s per element on these cores, against 0.7 s on the workstation, so the
+run would have taken about 15 h. Its partial log is not kept. The equivalence
+of the two versions rests on the existing checks:
+
+- `tests/test_koiter_tensors.py`: the new element loop matches the old one to
+  5e-16. It passes on the cluster, in the 44 tests above.
+- b_ijkl matches the baseline to 1e-13 on the DOE09 cases, measured on the
+  workstation with `benchmark_koiter_vectorization.py`. The repository
+  records that figure only in `PROMPT_cluster_koiter_benchmark.md`; the
+  workstation result tables are not committed.
+- Pcr at ny=160 matches the 0.3.2 runs of the convergence study to 1e-13
+  (NL) and 2e-14 (LIN).
+
+The speedup at ny=160 is therefore not measured on the cluster.
 
 ## Scaling with the number of elements, NL, ny=160
 
