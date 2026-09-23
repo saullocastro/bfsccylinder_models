@@ -872,11 +872,11 @@ blocks of the expansion:
 symbol in the code & meaning \\
 \midrule
 \texttt{phi2}                & $\phi_2 = \partial^2\phi/\partial\boldsymbol{\bar{u}}^2$, the tangent operator at the critical state \\
-\texttt{phi3\_ab[(i,j)]}     & $\phi_3$ contracted with modes $i,j$, one free index \\
-\texttt{phi4[(i,j,k,l)]}     & $\phi_4$ fully contracted \\
-\texttt{phi20\_a[i]}         & $\partial\phi_2/\partial\lambda$ contracted with mode $i$, one free index \\
-\texttt{phi30\_ab[(i,j)]}    & $\partial\phi_3/\partial\lambda$ contracted with modes $i,j$, one free index \\
-\texttt{phi200\_ab[(i,j)]}   & $\partial^2\phi_2/\partial\lambda^2$ fully contracted \\
+\texttt{phi3[:, i, j]}       & $\phi_3$ contracted with modes $i,j$, one free index \\
+\texttt{phi4[i, j, k, l]}    & $\phi_4$ fully contracted \\
+\texttt{phi20[:, i]}         & $\partial\phi_2/\partial\lambda$ contracted with mode $i$, one free index \\
+\texttt{phi30[:, i, j]}      & $\partial\phi_3/\partial\lambda$ contracted with modes $i,j$, one free index \\
+\texttt{phi200[i, j]}        & $\partial^2\phi_2/\partial\lambda^2$ fully contracted \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -889,6 +889,79 @@ Eq.~\ref{eq:strain} is $\boldsymbol{G}_x^\top\boldsymbol{G}_x$,
 $\boldsymbol{G}_y^\top\boldsymbol{G}_y$ and
 $\boldsymbol{G}_x^\top\boldsymbol{G}_y +
 \boldsymbol{G}_y^\top\boldsymbol{G}_x$ in the three strain components.
+Except for $\phi_2$, which is \texttt{KC + KG*mu[0]}, they are integrated by
+\texttt{koiter\_element\_tensors} of \texttt{koiter\_tensors.py}, the one
+element loop of the four models, which are left to supply only
+$\boldsymbol{G}_x$, $\boldsymbol{G}_y$ (von Karman or Sanders) and the
+membrane and coupling stiffness at the integration points
+(Section~\ref{sec:element-cost}).
+
+\subsection{Cost of the element loop}
+\label{sec:element-cost}
+
+Up to version 0.3.2 the element loop was repeated in each of the four models
+and evaluated every tensor with Python loops over the modes at every
+integration point: over the $n_c$ directions of the null space for
+$\phi_{20}$, over the $m^2$ pairs of Koiter modes for $\phi_3$, $\phi_{30}$,
+$\phi_{200}$ and the constants of the orthogonality conditions, several
+\texttt{np.einsum} calls with path optimisation per pair, and over the $m^4$
+quadruples for $\phi_4$, twelve small matrix products each.  With $m = 5$ that
+is about $10^5$ NumPy calls per element and @@BASE_MS_PER_EL@@~ms per element
+on one core, which for $m = 5$ at the production mesh of the design of
+experiments of Section~\ref{sec:cts} made the Koiter tensors cost five times
+the rest of the analysis.
+
+\texttt{koiter\_element\_tensors} evaluates the same terms with the modes and
+the $n_{int}^2 = 16$ integration points of an element as array axes.  Every
+term of the old loops becomes one contraction over the integration points
+and the three strain components, a single matrix product per element whatever
+$m$.  Three things make that possible without changing the arithmetic beyond
+round-off:
+\begin{itemize}\itemsep2pt
+  \item $\partial^2\boldsymbol{\varepsilon}/\partial\boldsymbol{\bar{u}}^2$ is
+        never formed.  Applied to a mode it is $\boldsymbol{G}_x^\top$ and
+        $\boldsymbol{G}_y^\top$ scaled by $\boldsymbol{G}_x\boldsymbol{u}$ and
+        $\boldsymbol{G}_y\boldsymbol{u}$, so its contractions with all the
+        directions at once are outer products.
+  \item The terms of $\phi_3$, $\phi_{30}$ and $\phi_{200}$ come in pairs that
+        are the same contraction with the two mode indices swapped, so each
+        pair is computed once and its second member is a transpose.
+  \item $\phi_4$ is accumulated as
+        $P_{abcd} = \sum w\, (\boldsymbol{A}\boldsymbol{E}_{ab})\cdot
+        \boldsymbol{E}_{cd}$, with $\boldsymbol{E}_{ab}$ the second-order
+        strain of modes $a$ and $b$.  The six terms of the old loop are six
+        permutations of it, which are applied once after the loop over the
+        elements.  With $\boldsymbol{A}$ symmetric they are three equal pairs;
+        all six are kept, which costs nothing and does not rely on it.
+\end{itemize}
+\texttt{tests/test\_koiter\_tensors.py} compares the result against the old
+loop, kept in the test as it was in version 0.3.2, on random elements with
+both kinematics and with and without \texttt{NLprebuck}: every tensor agrees
+to $5\times10^{-16}$ of its largest entry.
+
+The right-hand side of the bordered system, Eq.~\ref{eq:bordered}, is
+symmetric in $i$ and $j$, so $\boldsymbol{\bar{u}}_{ij} =
+\boldsymbol{\bar{u}}_{ji}$ and only the $m(m+1)/2$ fields with $i \le j$ are
+solved for, instead of $m^2$.  Version 0.3.2 solved for both, and its
+$\boldsymbol{\bar{u}}_{ij}$ and $\boldsymbol{\bar{u}}_{ji}$ differ by at most
+@@UIJ_ASYM@@ of the largest $|\boldsymbol{\bar{u}}_{ij}|$, which is round-off;
+the fields of the two versions differ by at most @@UIJ_DIFF@@.
+
+Measured with \texttt{doc/verification/benchmark\_koiter\_vectorization.py}
+on the DOE cases 0, 1 and 6 at $n_y = 40$ and $80$ and on the Waters shell,
+one core each, the element loop now costs @@NEW_LOOP_MS@@~ms per element for
+$m = 5$, and the whole Koiter section, $t(m) - t(0)$, is @@SPEEDUP_RANGE@@
+times faster than in version 0.3.2 for $m = 5$
+(\texttt{doc/verification/README.md} has the tables).  Pcr, the multipliers,
+$a_{ijk}$ and $b_{ijkl}$ agree with version 0.3.2 to @@MAX_REL_B@@ of the
+largest entry of each, and peak memory is unchanged.  What remains of the
+Koiter cost is the bordered solves, whose number grows as $m^2/2$ and whose
+cost grows faster than the number of elements; the element loop grows
+linearly with the number of elements and about as @@M_SCALING@@ with $m$.  At
+the production mesh of the design of experiments, $n_y = 160$, case 0 with
+\texttt{NLprebuck=True} and $m = 5$, the Koiter section takes
+@@KOITER_160_MS@@~ms per element, of which the element loop is
+@@LOOP_160_MS@@.
 
 %==============================================================================
 \section{Second-order fields and the orthogonality condition}
@@ -1866,6 +1939,9 @@ test & shell & reference \\
 \texttt{test\_cts\_shares\_nlprebuck\_algorithm.py}
   & ---
   & source parity \\
+\texttt{test\_koiter\_tensors.py}
+  & random elements
+  & the element loop of version 0.3.2, Section~\ref{sec:element-cost} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1877,7 +1953,10 @@ document.  The algorithm was spliced from one into the other rather than
 retyped, and that test is what keeps the two from diverging silently; the
 mesh generation, the per-integration-point $ABD$ of a variable-stiffness
 laminate, and the CTS-specific commentary are deliberately excluded from the
-comparison.
+comparison.  The element loop of the Koiter tensors needs no such test, the
+four models calling the same \texttt{koiter\_tensors.py};
+\texttt{test\_koiter\_tensors.py} checks it instead against the Python loops
+it replaced, kept in the test as they were in version 0.3.2.
 
 %==============================================================================
 \bibliographystyle{plainnat}
