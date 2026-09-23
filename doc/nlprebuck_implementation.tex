@@ -906,10 +906,10 @@ $\phi_{20}$, over the $m^2$ pairs of Koiter modes for $\phi_3$, $\phi_{30}$,
 $\phi_{200}$ and the constants of the orthogonality conditions, several
 \texttt{np.einsum} calls with path optimisation per pair, and over the $m^4$
 quadruples for $\phi_4$, twelve small matrix products each.  With $m = 5$ that
-is about $10^5$ NumPy calls per element and @@BASE_MS_PER_EL@@~ms per element
-on one core, which for $m = 5$ at the production mesh of the design of
-experiments of Section~\ref{sec:cts} made the Koiter tensors cost five times
-the rest of the analysis.
+is about $10^5$ NumPy calls per element and $0.7$ to $2$~s per element on one
+core, depending on the machine, which for $m = 5$ at the production mesh of
+the design of experiments of Section~\ref{sec:cts} made the Koiter tensors cost
+more than five times the rest of the analysis.
 
 \texttt{koiter\_element\_tensors} evaluates the same terms with the modes and
 the $n_{int}^2 = 16$ integration points of an element as array axes.  Every
@@ -942,26 +942,40 @@ to $5\times10^{-16}$ of its largest entry.
 The right-hand side of the bordered system, Eq.~\ref{eq:bordered}, is
 symmetric in $i$ and $j$, so $\boldsymbol{\bar{u}}_{ij} =
 \boldsymbol{\bar{u}}_{ji}$ and only the $m(m+1)/2$ fields with $i \le j$ are
-solved for, instead of $m^2$.  Version 0.3.2 solved for both, and its
-$\boldsymbol{\bar{u}}_{ij}$ and $\boldsymbol{\bar{u}}_{ji}$ differ by at most
-@@UIJ_ASYM@@ of the largest $|\boldsymbol{\bar{u}}_{ij}|$, which is round-off;
-the fields of the two versions differ by at most @@UIJ_DIFF@@.
+solved for, instead of $m^2$.  Version 0.3.2 solved for both.  On DOE case 6
+at $n_y = 40$ its $\boldsymbol{\bar{u}}_{ij}$ and $\boldsymbol{\bar{u}}_{ji}$
+differ by at most $5\times10^{-13}$ of the largest
+$|\boldsymbol{\bar{u}}_{ij}|$, and the fields of the two versions by
+$7\times10^{-13}$.  On the Waters shell, solved with SuperLU, the two figures
+are $2\times10^{-8}$ and $1.5\times10^{-7}$: the bordered system amplifies
+round-off by about $10^8$ there, and multiplying its right-hand side by
+$1 + 4\times10^{-16}r$, $r$ standard normal, moves the fields by
+$2.6\times10^{-7}$ and $b_{ijkl}$ by $1\times10^{-10}$
+(\texttt{bordered\_roundoff\_floor.py}).  That is the floor any change to the
+order of summation meets on this shell, the vectorization included.
 
-Measured with \texttt{doc/verification/benchmark\_koiter\_vectorization.py}
-on the DOE cases 0, 1 and 6 at $n_y = 40$ and $80$ and on the Waters shell,
-one core each, the element loop now costs @@NEW_LOOP_MS@@~ms per element for
-$m = 5$, and the whole Koiter section, $t(m) - t(0)$, is @@SPEEDUP_RANGE@@
-times faster than in version 0.3.2 for $m = 5$
-(\texttt{doc/verification/README.md} has the tables).  Pcr, the multipliers,
-$a_{ijk}$ and $b_{ijkl}$ agree with version 0.3.2 to @@MAX_REL_B@@ of the
-largest entry of each, and peak memory is unchanged.  What remains of the
-Koiter cost is the bordered solves, whose number grows as $m^2/2$ and whose
-cost grows faster than the number of elements; the element loop grows
-linearly with the number of elements and about as @@M_SCALING@@ with $m$.  At
-the production mesh of the design of experiments, $n_y = 160$, case 0 with
-\texttt{NLprebuck=True} and $m = 5$, the Koiter section takes
-@@KOITER_160_MS@@~ms per element, of which the element loop is
-@@LOOP_160_MS@@.
+On one core, the element loop costs $0.43$, $0.49$, $0.66$ and $1.06$~ms per
+element for $m = 1$, $2$, $5$ and $8$, against $14$, $52$, $1100$ and
+$5800$~ms for the loop of version 0.3.2 on the same elements, $34$ to $5500$
+times less (\texttt{element\_loop\_timing.py}).  It is now nearly independent
+of $m$, where it grew as about $m^4$.  What remains of the Koiter cost is the
+bordered solves: $m(m+1)/2$ of them, whose cost grows faster than the number
+of elements.  On DOE case 6 at $n_y = 40$ and the Waters shell at
+$n_y = 60$, 960 elements, the Koiter section is $14$ to $38$ times faster for
+$m = 2$ and $5$.  Pcr and the multipliers are identical to the last bit, the
+eigenvalue analysis being unchanged; $b_{ijkl}$ agrees to $10^{-13}$ of its
+largest entry on the DOE case and to the floor above, $9\times10^{-11}$, on
+the Waters shell.  The non-zero $a_{ijk}$, which occur only for an
+axisymmetric mode, agree to $10^{-14}$, and peak memory is unchanged.  At the
+production mesh of the design of experiments, $n_y = 160$, DOE case 0 with
+\texttt{NLprebuck=True} and $m = 5$ on a core of the cluster, the Koiter
+section takes $16.8$~ms per element, of which the element loop is $1.3$ and the
+bordered solves $15.3$.  Over 12,800 to 25,600 elements the time per element
+grows by $25$ per cent, following the bordered solves.  The old loop runs at
+$2.0$~s per element on those cores, so the Koiter section of that run is about
+$120$ times, and the whole run about $30$ times, faster; this is estimated
+from the element loop alone, the baseline run not having been completed there
+(\texttt{doc/verification/cluster\_results/REPORT.md}).
 
 %==============================================================================
 \section{Second-order fields and the orthogonality condition}
@@ -1735,7 +1749,10 @@ harmonic content of the critical mode, never the convergence history.
         problem per step.  In a design-of-experiments loop over thousands of
         samples, as the reference performs, this is the binding constraint,
         and the screening run of item~1 is the part worth doing on every
-        sample.
+        sample.  The Koiter section itself adds about $17$~ms per element with
+        five modes at $n_y = 160$, about a third of the rest of a
+        \texttt{NLprebuck=True} run, almost all of it in the bordered solves
+        (Section~\ref{sec:element-cost}).
 \end{enumerate}
 
 %==============================================================================
@@ -1876,6 +1893,12 @@ script & produces & runtime \\
   & Sections~\ref{sec:canonical} and \ref{sec:secondorder} & $\sim$7~min \\
 \texttt{quadrature\_convergence.py}
   & Section~\ref{sec:limits} & $\sim$10~min \\
+\texttt{element\_loop\_timing.py}
+  & Section~\ref{sec:element-cost} & $\sim$1~min \\
+\texttt{benchmark\_koiter\_vectorization.py}
+  & Section~\ref{sec:element-cost} & hours \\
+\texttt{bordered\_roundoff\_floor.py}
+  & Section~\ref{sec:element-cost} & $\sim$2~min \\
 \bottomrule
 \end{tabular}
 \end{center}
