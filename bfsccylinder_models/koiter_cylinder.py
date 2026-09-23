@@ -17,7 +17,8 @@ from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
         axisymmetric_basis, project_axisymmetric, canonical_modes,
         degenerate_partner)
-from bfsccylinder_models.koiter_tensors import koiter_element_tensors
+from bfsccylinder_models.koiter_tensors import (koiter_element_tensors,
+        a_coefficients, b_coefficients)
 
 num_nodes = 4
 
@@ -613,21 +614,21 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     # higher-order tensors for elements
 
-    #NOTE integrated by koiter_element_tensors, common to the four models,
-    #     for all the Koiter modes at once; only the kinematics,
-    #     nonlinear_rows, and the stiffness, calc_AB, are the model's own.
+    #NOTE the Koiter tensors and coefficients are computed with the modes as
+    #     axes of the arrays, never in loops over them, by the functions of
+    #     koiter_tensors.py, common to the four models, whose docstring
+    #     describes the strategy; the model supplies only its kinematics,
+    #     nonlinear_rows. The stiffness at the integration points is read
+    #     from the elements, where the CTS models store it per point and the
+    #     constant-stiffness ones the same laminate everywhere.
     #     phi3_ab[(a, b)] is phi3[:, a, b], phi20_a[k] is phi20[:, k], and
     #     likewise for phi30, cst, phi200 and phi4
     U = np.column_stack([ua[modek] for modek in range(koiter_num_modes)])
     Ucond = np.column_stack([ucond[modek] for modek in range(num_cond)])
-
-    def calc_AB(elem):
-        #NOTE the same laminate in every element
-        return prop.A, prop.B
-
+    lam = np.array([lambda_a[modei] for modei in range(koiter_num_modes)])
     phi20, phi3, phi30, cst, phi200, phi4 = koiter_element_tensors(elements,
             points, weights, u0, u0dot, u0ddot, Ucond, koiter_num_modes, flag,
-            nonlinear_rows, calc_AB)
+            nonlinear_rows)
 
     #NOTE phi2 must be the SAME operator whose null vector is the buckling
     #     mode, so it is built from the KC and KG of the eigenvalue analysis,
@@ -646,16 +647,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             phi2_ab[(modei, modej)] = left @ ua[modej]
 
     print('# a_ijk factors')
-    #NOTE phi3U[i, j, k] = phi3_ab[(i, j)] @ ua[k], in one product
+    #NOTE phi3U[i, j, k] = phi3_ab[(i, j)] @ ua[k], in one product, and
+    #     d[i] = phi20_a[i] @ ua[i], the denominator of a_ijk and b_ijkl
     phi3U = np.tensordot(phi3, U, axes=(0, 0))
+    d = np.array([phi20[:, modei] @ ua[modei]
+                  for modei in range(koiter_num_modes)])
+    a = a_coefficients(phi3U, lam, d)
     a_abc = {}
-    for modei in range(koiter_num_modes):
-        lambda_i = lambda_a[modei]
-        for modej in range(koiter_num_modes):
-            for modek in range(koiter_num_modes):
-                a_ijk = -1./(2*lambda_i)*phi3U[modei, modej, modek]/(phi20[:, modei] @ ua[modei])
-                a_abc[(modei, modej, modek)] = a_ijk
-                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
+    for idx in np.ndindex(a.shape):
+        a_abc[idx] = a[idx]
+        print('# $a_%d%d%d$' % tuple(i+1 for i in idx), a[idx])
     #NOTE the second order fields solve the terms of order xi_a xi_b of the
     #     equilibrium equations,
     #         phi2 uab + 1/2 phi3_ab + sum_l z_l phi20_a[l] = 0
@@ -705,8 +706,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #NOTE phi3_ab, cst_ab and hence the whole right hand side are symmetric
     #     in a and b, so uab = uba and only the fields with a <= b are solved
     #     for, m (m + 1)/2 solves instead of m**2. Solving for both gave
-    #     fields that differ by round off only, see "Cost of the element loop"
-    #     in doc/nlprebuck_implementation.tex
+    #     fields that differ by round off only, see "Vectorization of the
+    #     Koiter tensors" in doc/nlprebuck_implementation.tex
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
@@ -732,30 +733,12 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         phi3uab[:, :, modek, model] = np.tensordot(phi3, uijbar,
                 axes=(0, 0))
     phi30U = np.tensordot(phi30, U, axes=(0, 0))
+    #NOTE the formula of b_ijkl, not index-symmetric, is in b_coefficients
+    b = b_coefficients(phi4, phi3uab, phi30U, phi200, a, lam, d)
     b_ijkl = {}
-    for modei in range(koiter_num_modes):
-        phi20_i = phi20[:, modei]
-        lambda_i = lambda_a[modei]
-        for modej in range(koiter_num_modes):
-            for modek in range(koiter_num_modes):
-                for model in range(koiter_num_modes):
-                    b_ijkl[(modei, modej, modek, model)] = -1/(6*lambda_i*(phi20_i @ ua[modei]))*(
-                            phi4[modei, modej, modek, model]
-                            + 3*phi3uab[modei, modej, modek, model]
-                            + 3*phi3uab[modei, model, modej, modek]
-                            + lambda_i*(
-                                a_abc[(modei, modei, modej)]*phi30U[modei, modek, model]
-                               +a_abc[(modei, modej, modek)]*phi30U[modei, model, modei]
-                               +a_abc[(modei, modek, model)]*phi30U[modei, modei, modej]
-                                )
-                            + phi200[modei, modei]*lambda_i**2*(
-                                a_abc[(modei, modei, modej)]*a_abc[(modei, modek, model)]
-                               +a_abc[(modei, modej, modek)]*a_abc[(modei, model, modei)]
-                               +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]
-                                )
-                            )
-                    print('# $b_{%d%d%d%d}$, %f' % (modei+1, modej+1,
-                        modek+1, model+1, b_ijkl[(modei, modej, modek, model)]))
+    for idx in np.ndindex(b.shape):
+        b_ijkl[idx] = b[idx]
+        print('# $b_{%d%d%d%d}$, %f' % (tuple(i+1 for i in idx) + (b[idx],)))
 
     koiter = dict(
         a_ijk=a_abc,

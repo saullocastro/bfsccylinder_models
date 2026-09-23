@@ -1,22 +1,88 @@
-"""Element integration of the Koiter tensors, shared by the four models
+"""Koiter tensors and coefficients, shared by the four models
 
-The element loop used to be repeated, term for term, in koiter_cylinder.py,
-koiter_cylinder_sanders.py, koiter_cylinder_CTS.py and
-koiter_cylinder_CTS_sanders.py, with Python loops over every pair, and for
-phi4 every quadruple, of Koiter modes at every integration point. Here the
-modes are an axis of the arrays and the 16 integration points of an element
-another one, so that every term of the old loops is a single matrix product
-per element, whatever the number of modes.
+koiter_cylinder.py, koiter_cylinder_sanders.py, koiter_cylinder_CTS.py and
+koiter_cylinder_CTS_sanders.py call the functions below with the same
+arguments; the only thing each model supplies is ``nonlinear_rows``, its
+kinematics, von Karman or Sanders. See "Vectorization of the Koiter tensors"
+in doc/nlprebuck_implementation.tex.
 
-What differs between the models is passed in: the rows (G1, G2) of the
-nonlinear membrane strains, von Karman or Sanders, and the membrane and
-coupling stiffness at the integration points, constant or not.
+Vectorization strategy
+----------------------
+Up to version 0.3.2 every model integrated the tensors with Python loops over
+the Koiter modes at every integration point: over every pair of modes for
+phi3, phi30, phi200 and the constants of the orthogonality conditions, and
+over every quadruple for phi4, about 1e5 small NumPy calls per element with 5
+modes. That loop is kept in tests/test_koiter_tensors.py, which checks the
+functions below against it. Here the loops over the modes, and over the 16
+integration points of an element, become axes of the arrays:
+
+1. Axes. Within an element the arrays are indexed by
+       p  the integration point, P = nint**2 of them
+       i  the strain component, 3
+       c  the element DOF, 40
+       a, b, ...  the directions: the Koiter modes, or all the directions of
+          the null space of phi2 (suffix c in the names, for Ucond)
+   so that, for instance, EUc[p, i, a] is eps_i,u(u_a) at point p and
+   eabUc[p, i, c, a] is the row c of d2eps_i/du2 applied to u_a.
+
+2. One contraction per term and element. Every term of the old loops is a
+   sum over p and i of the product of two such arrays, which sum_pi computes
+   as a single matrix product; the weight of the point, w = 1/2 weight
+   lex ley/4, is folded into the smaller operand beforehand. Which term of
+   the old loop each call reproduces is noted next to it.
+
+3. d2eps/du2 is never formed. It is [G1^T G1, G2^T G2, G1^T G2 + G2^T G1],
+   so applied to a direction u it is G1^T and G2^T scaled by (G1 u, G2 u):
+   eabUc and the second-order strain E[p, i, a, b] = u_a . d2eps_i/du2 . u_b
+   are outer products of G1, G2 and q = G u, for every direction at once.
+
+4. Pairs of terms. The terms of phi3, phi30 and phi200 come in pairs that are
+   the same contraction with the mode indices a and b swapped. Each pair is
+   computed once, the second member being a transpose, T().
+
+5. phi4 once. Its six terms are permutations of the single quantity
+   P[a, b, c, d] = sum w (A E_ab) . E_cd, which is accumulated over the
+   points and elements; the permutations are applied once at the end. With A
+   symmetric the six terms are three equal pairs; all six are kept.
+
+6. Gather and scatter. The element vectors are taken from the global ones by
+   fancy indexing with the 40 DOFs of the element, and the element tensors
+   are added back the same way, those DOFs being distinct.
+
+The coefficients a_ijk and b_ijkl follow the same idea: they are array
+expressions over all their indices (a_coefficients, b_coefficients), from the
+contractions of the global tensors with the modes, each one tensordot. The
+dicts keyed by index tuples that the models return are built from them.
+
+The result equals the old loop to round-off, 5e-16 of the largest entry of
+every tensor, and the element loop costs about 1 ms per element, nearly
+independent of the number of modes, against 1 s for 5 modes and 6 s for 8
+before (doc/verification/element_loop_timing.py).
 """
 import numpy as np
 
 from bfsccylinder import DOF
 
 num_nodes = 4
+
+
+def calc_AB(elem):
+    """Membrane and coupling stiffness at the integration points of elem
+
+    Two (nint, nint, 3, 3) arrays indexed as elem.A11[i, j]. The CTS models
+    fill elem.A11 and the like per integration point, as the laminate varies
+    along x; the constant-stiffness models fill them with the same laminate
+    everywhere (assign_constant_ABD), bit for bit prop.A and prop.B
+    """
+    A = np.array([
+        [elem.A11, elem.A12, elem.A16],
+        [elem.A12, elem.A22, elem.A26],
+        [elem.A16, elem.A26, elem.A66]])
+    B = np.array([
+        [elem.B11, elem.B12, elem.B16],
+        [elem.B12, elem.B22, elem.B26],
+        [elem.B16, elem.B26, elem.B66]])
+    return A.transpose(2, 3, 0, 1), B.transpose(2, 3, 0, 1)
 
 
 def sum_pi(X, Y):
@@ -33,17 +99,12 @@ def sum_pi(X, Y):
 
 
 def T(S):
-    """S[c, a, b] -> S[c, b, a]
-
-    The terms of phi3, phi30 and phi200 come in pairs that are the same
-    contraction with the two mode indices a and b swapped, so every pair is
-    computed once and its second member is this transpose
-    """
+    """S[..., a, b] -> S[..., b, a], the second member of a pair of terms"""
     return S.swapaxes(-1, -2)
 
 
 def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
-        Ucond, koiter_num_modes, flag, nonlinear_rows, calc_AB):
+        Ucond, koiter_num_modes, flag, nonlinear_rows):
     """Koiter tensors assembled over all elements
 
     Parameters
@@ -68,10 +129,6 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
         ``nonlinear_rows(elem, xi, eta)`` returns (G1, G2), the rows of the
         nonlinear membrane strains eps_xx^NL = 1/2 (G1 u)**2,
         eps_yy^NL = 1/2 (G2 u)**2, gamma_xy^NL = (G1 u) (G2 u).
-    calc_AB : callable
-        ``calc_AB(elem)`` returns the membrane and coupling stiffness at the
-        integration points of ``elem``, two (nint, nint, 3, 3) arrays
-        indexed as elem.A11[i, j].
 
     Returns
     -------
@@ -113,6 +170,7 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
     for count, elem in enumerate(elements):
         if count % max(1, num_elements//5) == 0:
             print('#    count', count+1, num_elements)
+        #NOTE gather, strategy item 6
         indices = np.concatenate([c + offsets for c in
                                   (elem.c1, elem.c2, elem.c3, elem.c4)])
         Ze = Z[indices]
@@ -129,8 +187,8 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
             Bm[p] = elem.Bm
             Bb[p] = elem.Bb
         A, B = calc_AB(elem)
-        A = np.broadcast_to(A, (nint, nint, 3, 3)).reshape(P, 3, 3)
-        B = np.broadcast_to(B, (nint, nint, 3, 3)).reshape(P, 3, 3)
+        A = A.reshape(P, 3, 3)
+        B = B.reshape(P, 3, 3)
         #NOTE 1/2 weight (lex ley/4), the factor of every term of the old loops
         w = 1/2.*wpoints*(elem.lex*elem.ley/4.)
 
@@ -176,10 +234,11 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
         Nia0 = A @ eia0
         Mia0 = B @ eia0
 
-        #NOTE eiab = [G1^T G1, G2^T G2, G1^T G2 + G2^T G1] is never formed:
-        #     applied to a vector u it is G^T scaled by (G1 u, G2 u), so that
-        #       eabU[p, i, :, a] = eiab[p, i] @ u_a
-        #       E[p, i, a, b]    = u_a @ eiab[p, i] @ u_b
+        #NOTE strategy item 3: eiab = [G1^T G1, G2^T G2, G1^T G2 + G2^T G1]
+        #     is never formed; applied to a direction u it is G^T scaled by
+        #     (G1 u, G2 u), so that
+        #       eabUc[p, i, :, a] = eiab[p, i] @ u_a
+        #       E[p, i, a, b]     = u_a @ eiab[p, i] @ u_b
         #     for every direction at once. Niab and Miab are Aij and Bij
         #     applied to the first axis of eiab
         q1 = G1 @ Uce
@@ -220,10 +279,7 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
         eabU = eabUc[..., :m]
         NabU = NabUc[..., :m]
         MabU = MabUc[..., :m]
-        EU = EUc[..., :m]
         E0U = E0Uc[..., :m]
-        NU = NUc[..., :m]
-        N0U = N0Uc[..., :m]
         wEU, wE0U, wKU, wNU, wN0U = (X[..., :m]
                 for X in (wEUc, wE0Uc, wKUc, wNUc, wN0Uc))
         E = np.stack((q1[:, :m, None]*q1[:, None, :m],
@@ -237,8 +293,8 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
         wME = w[:, None, None, None]*ME
 
         #NOTE phi3e_ab[(a, b)] = phi3e[:, a, b], the nine terms of the old
-        #     loop. The second, fifth and eighth are the fourth, third and
-        #     ninth with a and b swapped
+        #     loop. Strategy item 4: the second, fifth and eighth are the
+        #     fourth, third and ninth with a and b swapped
         t2 = sum_pi(NabU, wEU)   # ((eib @ ub2) @ (Niac @ ua1))
         t5 = sum_pi(eabU, wNU)   # ((Nib @ ub2) @ (eiac @ ua1))
         t8 = sum_pi(MabU, wKU)   # ((kib @ ub2) @ (Miac @ ua1))
@@ -271,10 +327,12 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
                    + 2*T(t2)                    # es('ib,ia,a,b', Nib0, eia0, ua1, ub2)
                    + sum_pi(w[:, None]*Ni00, E))# es('i,iab,a,b', Ni00, eiab, ua1, ub2)
 
+        #NOTE strategy item 5
         Pabcd += sum_pi(wNE, E)
 
-        #NOTE the 40 DOFs of an element are distinct, so the fancy indexed
-        #     additions below do not lose repeated indices
+        #NOTE scatter, strategy item 6: the 40 DOFs of an element are
+        #     distinct, so the fancy indexed additions do not lose repeated
+        #     indices
         phi20[indices] += phi20e
         phi3[indices] += phi3e
         phi30[indices] += phi30e
@@ -300,3 +358,73 @@ def koiter_element_tensors(elements, points, weights, u0, u0dot, u0ddot,
             + Pabcd.transpose(2, 3, 0, 1))
 
     return phi20, phi3, phi30, cst, phi200, phi4
+
+
+def a_coefficients(phi3U, lam, d):
+    """a_ijk of every i, j and k
+
+    a_ijk = -1/(2 lambda_i) (phi3_ij . u_k)/(phi20_i . u_i)
+
+    Parameters
+    ----------
+    phi3U : (m, m, m) array
+        phi3U[i, j, k] = phi3_ab[(i, j)] @ ua[k].
+    lam : (m,) array
+        lambda_i.
+    d : (m,) array
+        d[i] = phi20_a[i] @ ua[i].
+    """
+    return -1./(2*lam[:, None, None])*phi3U/d[:, None, None]
+
+
+def b_coefficients(phi4, phi3uab, phi30U, phi200, a, lam, d):
+    """b_ijkl of every i, j, k and l, as the models have always computed them
+
+        b_ijkl = -1/(6 lambda_i d_i) (phi4_ijkl
+                 + 3 phi3_ij.u_kl + 3 phi3_il.u_jk
+                 + lambda_i (a_iij phi30_ik.u_l + a_ijk phi30_il.u_i
+                             + a_ikl phi30_ii.u_j)
+                 + phi200_ii lambda_i**2 (a_iij a_ikl + a_ijk a_ili
+                                          + a_ikl a_iij))
+
+    with d_i = phi20_i . u_i. Every term is written out below as a
+    broadcast over the four indices, in the order of the formula. The
+    formula is not symmetric in j, k and l, nor in i, see "Known limitations"
+    in doc/nlprebuck_implementation.tex and
+    doc/verification/multimode_b_symmetry.py; it is reproduced, not changed.
+
+    Parameters
+    ----------
+    phi4 : (m, m, m, m) array
+    phi3uab : (m, m, m, m) array
+        phi3uab[i, j, k, l] = phi3_ab[(i, j)] @ uab[(k, l)].
+    phi30U : (m, m, m) array
+        phi30U[i, k, l] = phi30_ab[(i, k)] @ ua[l].
+    phi200 : (m, m) array
+    a : (m, m, m) array
+        a_ijk, a_coefficients.
+    lam, d : (m,) arrays
+        As in a_coefficients.
+    """
+    m = lam.shape[0]
+    i = np.arange(m)
+    aii = a[i, i, :]              # aii[i, j] = a_iij
+    ali = a[i, :, i]              # ali[i, l] = a_ili
+    P30li = phi30U[i, :, i]       # P30li[i, l] = phi30_il . u_i
+    P30ii = phi30U[i, i, :]       # P30ii[i, j] = phi30_ii . u_j
+    li = lam[:, None, None, None]
+    return -1/(6*li*d[:, None, None, None])*(
+            phi4
+            + 3*phi3uab                                  # 3 phi3_ij . u_kl
+            + 3*phi3uab.transpose(0, 2, 3, 1)            # 3 phi3_il . u_jk
+            + li*(
+                aii[:, :, None, None]*phi30U[:, None, :, :]  # a_iij phi30_ik.u_l
+               + a[:, :, :, None]*P30li[:, None, None, :]    # a_ijk phi30_il.u_i
+               + a[:, None, :, :]*P30ii[:, :, None, None]    # a_ikl phi30_ii.u_j
+                )
+            + phi200[i, i][:, None, None, None]*li**2*(
+                aii[:, :, None, None]*a[:, None, :, :]       # a_iij a_ikl
+               + a[:, :, :, None]*ali[:, None, None, :]      # a_ijk a_ili
+               + a[:, None, :, :]*aii[:, :, None, None]      # a_ikl a_iij
+                )
+            )

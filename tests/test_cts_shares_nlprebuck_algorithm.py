@@ -1,15 +1,17 @@
-"""The CTS models must carry the SAME NLprebuck algorithm as the
-constant-stiffness models.
+"""The four models must carry the SAME NLprebuck and Koiter algorithm.
 
 The algorithm was spliced from koiter_cylinder.py and koiter_cylinder_sanders.py
-into koiter_cylinder_CTS*.py rather than retyped, so that the two model families
-cannot drift apart. This test asserts that character for character, on the
-regions that are meant to be shared: the axisymmetric pre-buckling solver and
-the iterative eigenvalue algorithm, the flag note, the kinematics of the Koiter
-tensors and the call that integrates them, phi2, the a_ijk, the bordered system
-for the second-order fields, and the b_ijkl block. The element integration of
-the Koiter tensors itself, the pre-buckling state and its rates included, is in
-koiter_tensors.py, which all four models call, so it is shared by construction.
+into koiter_cylinder_CTS*.py rather than retyped, so that the model families
+cannot drift apart. This test asserts that character for character:
+
+- across all four models, on the axisymmetric pre-buckling solver and the
+  iterative eigenvalue algorithm, and on the whole Koiter section, from the
+  normalization of the modes to the dict of coefficients returned; the Koiter
+  tensors and coefficients themselves are computed by koiter_tensors.py,
+  which all four call;
+- between the models of the same kinematics, on nonlinear_rows, the rows of
+  the nonlinear membrane strains, which is the one place where the von Karman
+  and the Sanders models differ in the Koiter section.
 
 What is deliberately NOT shared, and so is not compared: the mesh generation
 of the CTS parameterization, the per-integration-point ABD of a
@@ -24,31 +26,21 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.join(HERE, os.pardir, 'bfsccylinder_models')
 
+MODELS = ['koiter_cylinder.py', 'koiter_cylinder_sanders.py',
+          'koiter_cylinder_CTS.py', 'koiter_cylinder_CTS_sanders.py']
+
 #NOTE (start, end) of each shared region. Both markers must be unique in both
-#     files of a pair, which is itself part of what is being asserted
+#     files compared, which is itself part of what is being asserted
 REGIONS = [
     ('    def assemble_KG(u):', '    Pcr = load_mult[0]*Nxxunit*circ'),
-    ('    #NOTE this flag multiplies', '    flag = NLprebuck'),
-    ('    #NOTE the null space of phi2, against which',
-     '    num_cond = len(ucond)'),
-    ('def nonlinear_rows(elem, xi, eta):', '    return G1, G2'),
-    ('    #NOTE integrated by koiter_element_tensors',
-     '    Ucond = np.column_stack([ucond[modek] for modek in range(num_cond)])'),
-    ('    phi20, phi3, phi30, cst, phi200, phi4 = koiter_element_tensors(',
-     '            nonlinear_rows, calc_AB)'),
-    ('    #NOTE phi2 must be the SAME operator', '    phi2uu = KCuu + KGuu*mu[0]'),
-    ("    print('# a_ijk factors')",
-     "                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)"),
-    ('    #NOTE the second order fields solve the terms of order',
-     '        return -1/2.*phi3[:, modei, modej] - phi20[:, :koiter_num_modes] @ z'),
-    ('    #NOTE phi2 is singular by construction',
-     '            uab[(modei, modej)] = uijbar'),
     #NOTE not '    return out' as the end marker: the CTS models return early
-    #     for mesh_only and for koiter_num_modes == 0
-    ("    print('# b_ijkl factors')", "    out['koiter'] = koiter"),
+    #     for mesh_only
+    ('    lambda_a = {}', "    out['koiter'] = koiter"),
 ]
-
-PAIRS = [
+KINEMATICS_REGIONS = [
+    ('def nonlinear_rows(elem, xi, eta):', '    return G1, G2'),
+]
+SAME_KINEMATICS = [
     ('koiter_cylinder_CTS.py', 'koiter_cylinder.py'),
     ('koiter_cylinder_CTS_sanders.py', 'koiter_cylinder_sanders.py'),
 ]
@@ -72,20 +64,33 @@ def _region(text, start, end, name):
     return text[i:j]
 
 
-@pytest.mark.parametrize('cts, nr', PAIRS)
-@pytest.mark.parametrize('start, end', REGIONS)
-def test_shared_region_is_identical(cts, nr, start, end):
-    a = _region(_read(cts), start, end, cts)
-    b = _region(_read(nr), start, end, nr)
+def _assert_same(a_name, b_name, start, end):
+    a = _region(_read(a_name), start, end, a_name)
+    b = _region(_read(b_name), start, end, b_name)
     assert a == b, (
             '%s and %s have diverged in the region starting at %r.\n'
-            'The NLprebuck algorithm is meant to be identical in both; port '
-            'the change to the other file rather than letting them drift.'
-            % (cts, nr, start))
+            'The algorithm is meant to be identical in both; port the change '
+            'to the other files rather than letting them drift.'
+            % (a_name, b_name, start))
+
+
+@pytest.mark.parametrize('model', MODELS[:-1])
+@pytest.mark.parametrize('start, end', REGIONS)
+def test_shared_region_is_identical(model, start, end):
+    _assert_same(MODELS[-1], model, start, end)
+
+
+@pytest.mark.parametrize('a_name, b_name', SAME_KINEMATICS)
+@pytest.mark.parametrize('start, end', KINEMATICS_REGIONS)
+def test_kinematics_is_identical(a_name, b_name, start, end):
+    _assert_same(a_name, b_name, start, end)
 
 
 if __name__ == '__main__':
-    for cts, nr in PAIRS:
+    for model in MODELS[:-1]:
         for start, end in REGIONS:
-            test_shared_region_is_identical(cts, nr, start, end)
+            test_shared_region_is_identical(model, start, end)
+    for a_name, b_name in SAME_KINEMATICS:
+        for start, end in KINEMATICS_REGIONS:
+            test_kinematics_is_identical(a_name, b_name, start, end)
     print('ok')

@@ -1,13 +1,15 @@
-"""koiter_element_tensors against the element loop it replaced
+"""koiter_tensors.py against the loops it replaced
 
 Until version 0.3.2 the four models integrated the Koiter tensors with Python
 loops over every pair, and for phi4 every quadruple, of Koiter modes at every
-integration point. reference_element_tensors below is that loop, transcribed
-from koiter_cylinder_CTS_sanders.py of version 0.3.2 with only the gathers and
-the kinematics factored out. The vectorized integration must reproduce it to
-round off, for both kinematics and with and without the nonlinear
-pre-buckling terms, on elements with random stiffness, pre-buckling state and
-modes, where no symmetry of a real cylinder can hide a wrong index.
+integration point, and computed a_ijk and b_ijkl in loops over their indices.
+reference_element_tensors and reference_coefficients below are those loops,
+transcribed from koiter_cylinder_CTS_sanders.py of version 0.3.2 with only the
+gathers and the kinematics factored out. The vectorized functions must
+reproduce them to round off: the element tensors for both kinematics and with
+and without the nonlinear pre-buckling terms, on elements with random
+stiffness, pre-buckling state and modes, where no symmetry of a real cylinder
+can hide a wrong index, and the coefficients on random contractions.
 """
 import os
 import sys
@@ -24,7 +26,8 @@ from bfsccylinder import BFSCCylinder, DOF
 from bfsccylinder.sanders import BFSCCylinderSanders
 from bfsccylinder.quadrature import get_points_weights
 
-from bfsccylinder_models.koiter_tensors import koiter_element_tensors
+from bfsccylinder_models.koiter_tensors import (koiter_element_tensors,
+        a_coefficients, b_coefficients)
 from bfsccylinder_models import koiter_cylinder, koiter_cylinder_CTS_sanders
 
 num_nodes = 4
@@ -268,11 +271,8 @@ def test_matches_the_loop_it_replaced(sanders, flag):
     ref = reference_element_tensors(elements, points, weights, u0, u0dot,
             u0ddot, ucond, m, flag, sanders)
     model = koiter_cylinder_CTS_sanders if sanders else koiter_cylinder
-    #NOTE calc_AB of the CTS model, which reads the per point stiffness of
-    #     the element, also for von Karman, whose model files use prop.A
     new = koiter_element_tensors(elements, points, weights, u0, u0dot,
-            u0ddot, Ucond, m, flag, model.nonlinear_rows,
-            koiter_cylinder_CTS_sanders.calc_AB)
+            u0ddot, Ucond, m, flag, model.nonlinear_rows)
     phi20, phi3, phi30, cst, phi200, phi4 = new
     phi20_a, phi3_ab, phi30_ab, cst_ab, phi200_ab, phi4_ref = ref
 
@@ -295,8 +295,66 @@ def test_matches_the_loop_it_replaced(sanders, flag):
                                     for i in range(m)]), 'phi200')
 
 
+def reference_coefficients(phi3U, phi4, phi3uab, phi30U, phi200, lam, d):
+    """The loops over the indices of a_ijk and b_ijkl of version 0.3.2, the
+    contractions with the modes given"""
+    m = lam.shape[0]
+    a_abc = {}
+    for modei in range(m):
+        lambda_i = lam[modei]
+        for modej in range(m):
+            for modek in range(m):
+                a_abc[(modei, modej, modek)] = -1./(2*lambda_i)*phi3U[modei, modej, modek]/d[modei]
+    b_ijkl = {}
+    for modei in range(m):
+        lambda_i = lam[modei]
+        for modej in range(m):
+            for modek in range(m):
+                for model in range(m):
+                    b_ijkl[(modei, modej, modek, model)] = -1/(6*lambda_i*d[modei])*(
+                            phi4[modei, modej, modek, model]
+                            + 3*phi3uab[modei, modej, modek, model]
+                            + 3*phi3uab[modei, model, modej, modek]
+                            + lambda_i*(
+                                a_abc[(modei, modei, modej)]*phi30U[modei, modek, model]
+                               +a_abc[(modei, modej, modek)]*phi30U[modei, model, modei]
+                               +a_abc[(modei, modek, model)]*phi30U[modei, modei, modej]
+                                )
+                            + phi200[modei, modei]*lambda_i**2*(
+                                a_abc[(modei, modei, modej)]*a_abc[(modei, modek, model)]
+                               +a_abc[(modei, modej, modek)]*a_abc[(modei, model, modei)]
+                               +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]
+                                )
+                            )
+    return a_abc, b_ijkl
+
+
+def test_coefficients_match_the_loops_they_replaced():
+    """Random contractions, so that every term of b_ijkl, those in a_ijk
+    included, which vanish on a cylinder, is exercised with distinct
+    values at every index"""
+    rng = np.random.default_rng(7)
+    m = 4
+    phi3U = rng.standard_normal((m,)*3)
+    phi4 = rng.standard_normal((m,)*4)
+    phi3uab = rng.standard_normal((m,)*4)
+    phi30U = rng.standard_normal((m,)*3)
+    phi200 = rng.standard_normal((m, m))
+    lam = 1 + rng.random(m)
+    d = 1 + rng.random(m)
+    a_ref, b_ref = reference_coefficients(phi3U, phi4, phi3uab, phi30U,
+                                          phi200, lam, d)
+    a = a_coefficients(phi3U, lam, d)
+    b = b_coefficients(phi4, phi3uab, phi30U, phi200, a, lam, d)
+    _assert_close(a, np.array([a_ref[k] for k in np.ndindex(a.shape)]
+                              ).reshape(a.shape), 'a_ijk')
+    _assert_close(b, np.array([b_ref[k] for k in np.ndindex(b.shape)]
+                              ).reshape(b.shape), 'b_ijkl')
+
+
 if __name__ == '__main__':
     for sanders in [False, True]:
         for flag in [False, True]:
             test_matches_the_loop_it_replaced(sanders, flag)
+    test_coefficients_match_the_loops_they_replaced()
     print('ok')

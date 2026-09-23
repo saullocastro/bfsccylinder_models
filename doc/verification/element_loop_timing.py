@@ -6,7 +6,8 @@ integrate the same four Sanders elements with random stiffness, pre-buckling
 state and modes, NLprebuck on, with m Koiter modes and m + 2 directions of
 the null space of phi2, as in the DOE runs (num_cond = 7 for m = 5). Only the
 element loop is timed: the bordered solves, which the models add after it,
-depend on the mesh and on the solver, see benchmark_koiter_vectorization.py.
+depend on the mesh and on the solver, see "Vectorization of the Koiter
+tensors" in doc/nlprebuck_implementation.tex.
 Run it on an otherwise idle machine, one BLAS thread:
 
     OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python element_loop_timing.py [modes]
@@ -52,7 +53,7 @@ def main():
         ucond = {k: Ucond[:, k] for k in range(nc)}
         new = median_time(lambda: koiter_element_tensors(elements, points,
                 weights, u0, u0dot, u0ddot, Ucond, m, True,
-                model.nonlinear_rows, model.calc_AB), 21)/ne
+                model.nonlinear_rows), 21)/ne
         old = median_time(lambda: reference_element_tensors(elements, points,
                 weights, u0, u0dot, u0ddot, ucond, m, True, True),
                 3 if m < 8 else 1)/ne
