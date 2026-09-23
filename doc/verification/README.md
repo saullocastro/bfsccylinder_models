@@ -44,6 +44,9 @@ these checks measure.
 | `reference_load_stepping.py` | how the load stepping reaches the expansion point on the reference meshes: the state at the reference load, `s` and the permissible `eta` per load step, the Newton-Raphson residuals, what the eigen solver returns, `a_111`, the conditioning of the reduced tangent with and without scaling, and the residual of `phi2` along the mode with consistent and inconsistent operators | ~6 min |
 | `reference_b_reproducibility.py` | `b_1111` with one and with the default number of BLAS threads, and with and without the degenerate partner in the column border of the bordered system | ~7 min |
 | `quadrature_convergence.py` | zero energy modes of one element, and `lambda_c` and `b_1111` of the reference shells, against the number of Gauss points | ~10 min |
+| `element_loop_timing.py` | time per element of the Koiter element loop, version 0.3.2 against `koiter_tensors.py`, for m = 1, 2, 5, 8 | ~1 min |
+| `bordered_roundoff_floor.py` | how far `uij` and `b_ijkl` move when the right-hand side of the bordered solves is perturbed at round-off level, the floor for any comparison of two versions | ~2 min |
+| `multimode_b_symmetry.py` | where the index non-symmetry of the multi-mode `b_ijkl` comes from: its asymmetry under every swap of two indices, and its agreement with the three-pairing form once symmetrized over `j, k, l`; changes nothing | ~2 min |
 
 ## Literature verification cases
 
@@ -57,4 +60,6 @@ These live in `tests/` because they assert rather than report:
 | `test_buckling_mode_cluster.py` | Sun et al. §3.1 | degeneracy and cluster structure |
 | `test_second_order_conditions.py` | Sun et al. §3.1, coarse | the orthogonality conditions of the bordered system hold along every direction of the null space, against a central difference of the compiled tangent; the rebuilt degenerate partner is in the column border |
 | `test_linBuck_VAFW.py`, `test_Zhihua_error.py` | VAFW cylinders | linear buckling |
-| `test_cts_shares_nlprebuck_algorithm.py` | — | source parity between the CTS and the constant-stiffness models |
+| `test_cts_shares_nlprebuck_algorithm.py` | — | source parity of the four models: the pre-buckling and eigenvalue algorithm and the whole Koiter section identical in all four, `nonlinear_rows` in the two of each kinematics |
+| `test_koiter_tensors.py` | random elements | `koiter_tensors.py` against the loops of version 0.3.2 it replaced: the element tensors for both kinematics, with and without `NLprebuck`, and `a_ijk`, `b_ijkl` |
+

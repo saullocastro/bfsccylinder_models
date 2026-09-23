@@ -233,13 +233,14 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     #     the Koiter modes, as the amplitude equations T z = -1/2 phi3_ij . u_k
     #     make it, with modes that are not T-orthogonal, T_kl = phi20_k . u_l,
     #     where lambda_l a_lij in place of z would not do. The bordered solves
-    #     are the last m*m of the model
+    #     are the last m (m + 1)/2 of the model, uij = uji being solved for
+    #     once
     U = np.column_stack([koiter['ui'][k][bu] for k in range(m)])
     A, _ = solves[-1]
     W = A[nu:nu + m, :nu].toarray()
     T = W @ U
     assert abs(T[0, 1]) > 1e-3*np.sqrt(abs(T[0, 0]*T[1, 1]))
-    for A, b in solves[-m*m:]:
+    for A, b in solves[-m*(m + 1)//2:]:
         assert A.shape[0] == nu + len(koiter['ucond'])
         g = b[:nu]
         assert np.abs(U.T @ g).max() <= 1e-9*np.linalg.norm(U, axis=0).max()*np.linalg.norm(g)

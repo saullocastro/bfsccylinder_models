@@ -39,7 +39,7 @@ the arbitrariness left by the degenerate buckling modes, and the
 stiffness-weighted orthogonality condition imposed on the second-order
 fields, and the mesh resolution the continuous-tow-shearing cylinders
 require.
-The notation follows the finite element chapter of \citet{castro2023}.  Equation
+The notation follows Chapter~7 of \citet{degenhardt2017}.  Equation
 numbers of the form ``Sun~Eq.~(nn)'' refer to \citet{sun2020}.
 \end{abstract}
 
@@ -554,7 +554,9 @@ and caps the step at a fraction $f$ of the permissible value:
 	\qquad f = 0.7
 \end{equation}
 
-Substituting Eq.~\ref{eq:eta-capped} into Eq.~\ref{eq:step-overshoot} gives
+Whenever the cap is active, that is, for $s < 0$ and $f/(1-s) < \eta$, which
+is $s < -0.4$ for the fixed $\eta = 0.5$, substituting
+Eq.~\ref{eq:eta-capped} into Eq.~\ref{eq:step-overshoot} gives
 $\lambda_b' - \lambda_c' = -(1-f)\,(\lambda_c - \lambda_b)$ whatever the value
 of $s$, so the cap does not merely prevent the overshoot: it turns
 Eq.~\ref{eq:step} into a secant iteration on $\lambda_c(\lambda_b) -
@@ -583,8 +585,11 @@ whatever the overshoot.  The distance is therefore taken in absolute value:
 \end{equation}
 
 If the load level lands past the bifurcation point by more than
-$\varepsilon_1$, the load step is taken again from the previous state with
-$\eta$ halved.  The fundamental path is still computable there, the
+$\varepsilon_1$, the load step is taken again from the previous state with a
+cap on $\eta$ that starts at $1$ and is halved at every overshoot, so that
+after the $k$-th overshoot $\eta \le 2^{-k}$.  The first retry therefore
+repeats the step unchanged whenever $\eta \le 0.5$ already, which is the case
+from the second load step on, and only the following ones take it shorter.  The fundamental path is still computable there, the
 pre-buckling solve being restricted to the axisymmetric subspace, but the
 expansion is meant to be made on the near side of it.
 
@@ -867,11 +872,11 @@ blocks of the expansion:
 symbol in the code & meaning \\
 \midrule
 \texttt{phi2}                & $\phi_2 = \partial^2\phi/\partial\boldsymbol{\bar{u}}^2$, the tangent operator at the critical state \\
-\texttt{phi3\_ab[(i,j)]}     & $\phi_3$ contracted with modes $i,j$, one free index \\
-\texttt{phi4[(i,j,k,l)]}     & $\phi_4$ fully contracted \\
-\texttt{phi20\_a[i]}         & $\partial\phi_2/\partial\lambda$ contracted with mode $i$, one free index \\
-\texttt{phi30\_ab[(i,j)]}    & $\partial\phi_3/\partial\lambda$ contracted with modes $i,j$, one free index \\
-\texttt{phi200\_ab[(i,j)]}   & $\partial^2\phi_2/\partial\lambda^2$ fully contracted \\
+\texttt{phi3[:, i, j]}       & $\phi_3$ contracted with modes $i,j$, one free index \\
+\texttt{phi4[i, j, k, l]}    & $\phi_4$ fully contracted \\
+\texttt{phi20[:, i]}         & $\partial\phi_2/\partial\lambda$ contracted with mode $i$, one free index \\
+\texttt{phi30[:, i, j]}      & $\partial\phi_3/\partial\lambda$ contracted with modes $i,j$, one free index \\
+\texttt{phi200[i, j]}        & $\partial^2\phi_2/\partial\lambda^2$ fully contracted \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -884,6 +889,154 @@ Eq.~\ref{eq:strain} is $\boldsymbol{G}_x^\top\boldsymbol{G}_x$,
 $\boldsymbol{G}_y^\top\boldsymbol{G}_y$ and
 $\boldsymbol{G}_x^\top\boldsymbol{G}_y +
 \boldsymbol{G}_y^\top\boldsymbol{G}_x$ in the three strain components.
+Except for $\phi_2$, which is \texttt{KC + KG*mu[0]}, they are computed by
+\texttt{koiter\_tensors.py}, as described next.
+
+\subsection{Vectorization of the Koiter tensors}
+\label{sec:vectorization}
+
+Up to version 0.3.2 each of the four models evaluated the tensors in its own
+element loop, with Python loops over the modes at every integration point:
+over the $n_c$ directions of the null space for $\phi_{20}$, over the $m^2$
+pairs of Koiter modes for $\phi_3$, $\phi_{30}$, $\phi_{200}$ and the
+constants of the orthogonality conditions, with several \texttt{np.einsum}
+calls with path optimisation per pair, and over the $m^4$ quadruples for
+$\phi_4$, with twelve small matrix products each.  With $m = 5$ that is about
+$10^5$ NumPy calls and $0.65$~s per element on one core of a workstation,
+$2$~s on one of the cluster, and at the production mesh of the design of
+experiments of Section~\ref{sec:cts} the Koiter tensors cost more than five
+times the rest of the analysis.  $a_{ijk}$ and $b_{ijkl}$ were then evaluated
+in loops over their indices.
+
+\paragraph{What is shared.}  \texttt{koiter\_tensors.py} holds the element
+loop, \texttt{koiter\_element\_tensors}, the stiffness at the integration
+points, \texttt{calc\_AB}, and the coefficients, \texttt{a\_coefficients} and
+\texttt{b\_coefficients}.  The four models call them with the same arguments,
+and their Koiter sections, from the normalisation of the modes to the
+coefficients returned, are identical character for character, which
+\texttt{tests/test\_cts\_shares\_nlprebuck\_algorithm.py} asserts.  The only
+thing a model supplies is its kinematics, \texttt{nonlinear\_rows}, which
+returns $\boldsymbol{G}_x$ and $\boldsymbol{G}_y$ at a point: von Karman or,
+with $\boldsymbol{G}_y - \boldsymbol{S}_v/R$ in place of $\boldsymbol{G}_y$,
+Sanders.  \texttt{calc\_AB} reads $\boldsymbol{A}$ and $\boldsymbol{B}$ at the
+integration points from the element, where the CTS models store the laminate
+of every point and the constant-stiffness models the same laminate
+everywhere, bit for bit the matrices they used before.  The bordered solves
+stay in the models, whose \texttt{spsolve} the design of experiments and the
+tests replace.
+
+\paragraph{Strategy.}  The loops over the modes and over the $P = n_{int}^2$
+integration points of an element become axes of the arrays:
+\begin{enumerate}\itemsep2pt
+  \item \emph{Axes.}  Within an element the arrays are indexed by the
+        integration point $p$, the strain component $i$, the element degree
+        of freedom $c$, 40 of them, and the directions $a, b, \dots$.  One
+        pass takes all the $n_c$ directions of the null space, the Koiter
+        modes being the first $m$: $\phi_{20}$ needs all of them, the other
+        tensors the first $m$ only, which are slices.
+  \item \emph{One contraction per term and element.}  Every term of the old
+        loops is a sum over $p$ and $i$ of the product of two such arrays,
+        \[
+        S_{\dots\dots} = \sum_{p,i} X_{pi\dots}\,Y_{pi\dots},
+        \]
+        which is a single matrix product (\texttt{sum\_pi}), the weight
+        $w_p = \frac{1}{2}\,w_{\xi}w_{\eta}\,\ell_x\ell_y/4$ of the point,
+        with $\ell_x$ and $\ell_y$ the side lengths of the element, being
+        folded into the smaller operand.  The code notes next to every
+        call the term of the old loop it reproduces.
+  \item \emph{The quadratic form is never formed.}  Applied to a direction
+        $\boldsymbol{u}_a$ it is
+        $[\boldsymbol{G}_x^\top q_{x,a},\ \boldsymbol{G}_y^\top q_{y,a},\
+        \boldsymbol{G}_x^\top q_{y,a} + \boldsymbol{G}_y^\top q_{x,a}]$ with
+        $q_{x,a} = \boldsymbol{G}_x\boldsymbol{u}_a$ and
+        $q_{y,a} = \boldsymbol{G}_y\boldsymbol{u}_a$, and the second-order
+        strain of two modes is
+        $\boldsymbol{E}_{ab} = [q_{x,a}q_{x,b},\ q_{y,a}q_{y,b},\
+        q_{x,a}q_{y,b} + q_{y,a}q_{x,b}]$, outer products for every
+        direction at once.
+  \item \emph{Pairs of terms.}  The terms of $\phi_3$, $\phi_{30}$ and
+        $\phi_{200}$ come in pairs that are the same contraction with the two
+        mode indices swapped: the second and fourth, third and fifth, and
+        eighth and ninth of the nine terms of $\phi_3$, the second and fourth
+        and third and fifth of the six of $\phi_{30}$, the second and third
+        of the four of $\phi_{200}$.  Each pair is computed once, its second
+        member being a transpose.  The constant of the orthogonality
+        conditions is the first term of $\phi_{30}$ and is computed once for
+        both.
+  \item \emph{$\phi_4$ once.}  Its six terms are permutations of the single
+        quantity
+        $P_{abcd} = \sum_{p} w_p\,(\boldsymbol{A}\boldsymbol{E}_{ab})\cdot
+        \boldsymbol{E}_{cd}$, accumulated over the points and the elements:
+        \[
+        \phi_{4,abcd} = P_{abcd} + P_{acbd} + P_{adbc} + P_{bcad}
+                      + P_{bdac} + P_{cdab}.
+        \]
+        The permutations are applied once, after the loop over the elements.
+        With $\boldsymbol{A}$ symmetric the six terms are three equal pairs;
+        all six are kept, which costs nothing and does not rely on it.
+  \item \emph{Gather and scatter.}  The element vectors are taken from the
+        global ones by indexing with the 40 degrees of freedom of the
+        element, and the element tensors are added back the same way, those
+        degrees of freedom being distinct.  The global tensors are arrays,
+        $\phi_{3,ij}$ being \texttt{phi3[:, i, j]} and so on.
+  \item \emph{Coefficients.}  The contractions of the global tensors with
+        the modes, $\phi_{3,ij}\cdot\delta\boldsymbol{\bar{u}}_k$,
+        $\phi_{30,ik}\cdot\delta\boldsymbol{\bar{u}}_l$,
+        $\phi_{3,ij}\cdot\boldsymbol{\bar{u}}_{kl}$, $T_{kl}$ and the
+        constants of the orthogonality conditions, are products over the
+        degrees of freedom for all the indices at once, one per second-order
+        field for $\phi_{3,ij}\cdot\boldsymbol{\bar{u}}_{kl}$.  $a_{ijk}$ and $b_{ijkl}$,
+        Eqs.~\ref{eq:a-coefficient} and \ref{eq:b-coefficient}, are then
+        broadcasts over all their indices, with the terms written out in the
+        order of the equations.  Eq.~\ref{eq:b-coefficient} is reproduced as
+        it stands, its non-symmetry included (Section~\ref{sec:limits}).
+  \item \emph{Second-order fields.}  The right-hand side of the bordered
+        system, Eq.~\ref{eq:bordered}, is symmetric in $i$ and $j$, so
+        $\boldsymbol{\bar{u}}_{ij} = \boldsymbol{\bar{u}}_{ji}$ and only the
+        $m(m+1)/2$ fields with $i \le j$ are solved for, instead of $m^2$.
+\end{enumerate}
+
+\paragraph{Verification.}  \texttt{tests/test\_koiter\_tensors.py} keeps the
+loops of version 0.3.2 and compares against them: on random elements, with
+both kinematics and with and without \texttt{NLprebuck}, every tensor agrees
+to $5\times10^{-16}$ of its largest entry, and on random contractions so do
+$a_{ijk}$ and $b_{ijkl}$, including the terms in $a_{ijk}$ that vanish on a
+cylinder.  On the models, Pcr and the multipliers are identical to the last
+bit, the eigenvalue analysis being unchanged.  Version 0.3.2 solved for both
+$\boldsymbol{\bar{u}}_{ij}$ and $\boldsymbol{\bar{u}}_{ji}$.  On DOE case 6
+at $n_y = 40$ they differ by at most $5\times10^{-13}$ of the largest
+$|\boldsymbol{\bar{u}}_{ij}|$, the fields of the two versions by
+$7\times10^{-13}$ and $b_{ijkl}$ by $10^{-13}$ of its largest entry.  On the
+Waters shell, solved with SuperLU, the three figures are $2\times10^{-8}$,
+$1.5\times10^{-7}$ and $9\times10^{-11}$: the bordered system amplifies
+round-off by about $10^8$ there, and multiplying its right-hand side by
+$1 + 4\times10^{-16}r$, $r$ standard normal, moves the fields by
+$2.6\times10^{-7}$ and $b_{ijkl}$ by $1\times10^{-10}$
+(\texttt{bordered\_roundoff\_floor.py}), the floor any change to the order of
+summation meets on that shell.  The non-zero $a_{ijk}$, which occur only for
+an axisymmetric mode, agree to $10^{-14}$.
+
+\paragraph{Cost.}  On one core of a workstation the element loop costs
+$0.40$, $0.49$, $0.59$ and $0.70$~ms per element for $m = 1$, $2$, $5$ and
+$8$, against $14$, $52$, $650$ and $3400$~ms for the loop of version 0.3.2 on
+the same elements, $35$ to $4800$ times less
+(\texttt{element\_loop\_timing.py}).  It is now nearly independent of $m$,
+where it grew as about $m^4$, and it is linear in the number of elements.
+What remains of the Koiter cost is the bordered solves, $m(m+1)/2$ of them,
+whose cost grows faster than the number of elements and depends on the
+solver.  The following figures were measured once, during the change, with a
+driver that ran both versions of the models and is not kept in the
+repository.  On DOE case 6 at $n_y = 40$ and the Waters shell at $n_y = 60$,
+960 elements, the Koiter section is $14$ to $38$ times faster for $m = 2$ and
+$5$, with peak memory unchanged.  At the production mesh of the design of
+experiments, $n_y = 160$, DOE case 0 with \texttt{NLprebuck=True} and $m = 5$
+on a core of the cluster, the Koiter section takes $16.8$~ms per element, of
+which the element loop is $1.3$ and the bordered solves $15.3$; from $12{,}800$
+to $25{,}600$ elements the time per element grows by $25$ per cent, following
+the bordered solves.  The old element loop runs at $2.0$~s per element on
+those cores, so the Koiter section of that run is about $120$ times, and the
+whole run about $30$ times, faster.  This is estimated from the element loop
+alone, as the old version was not run to completion at that size.
 
 %==============================================================================
 \section{Second-order fields and the orthogonality condition}
@@ -1108,7 +1261,7 @@ not.
 Eq.~\ref{eq:condition} without the tensors the model assembles.  The first
 comes from a central difference of the tangent of the compiled element along
 $\boldsymbol{\hat{u}}_{,\lambda}$, which is exact because
-$\boldsymbol{K}_{C0} + \boldsymbol{K}_C^{NL}(\boldsymbol{u}) +
+$\boldsymbol{K}_0 + \boldsymbol{K}_C^{NL}(\boldsymbol{u}) +
 \boldsymbol{K}_G(\boldsymbol{u})$ is quadratic in $\boldsymbol{u}$.  The
 second comes from integrating Eq.~\ref{eq:cconst} with the strain operators
 of the element.  The test checks that the condition holds, for both
@@ -1170,6 +1323,11 @@ With the second-order fields available, the coefficients are
 	\Big]
 \end{multline}
 
+Both are evaluated as array expressions over all their indices by
+\texttt{a\_coefficients} and \texttt{b\_coefficients} of
+\texttt{koiter\_tensors.py} (Section~\ref{sec:vectorization}), which write
+Eq.~\ref{eq:b-coefficient} term for term, index pattern included.
+
 The buckling modes are normalised so that the largest nodal translation
 equals the shell thickness.  The reference solutions normalise by the crest
 amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
@@ -1197,7 +1355,9 @@ amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
   \Repeat
     \State $\lambda_b^{new} \gets \lambda_b + \eta(\lambda_c-\lambda_b)$
     \State predictor $\boldsymbol{\hat{u}} +
-           \boldsymbol{\hat{u}}_{,\lambda}(\lambda_b^{new}-\lambda_b)$;
+           \boldsymbol{\hat{u}}_{,\lambda}(\lambda_b^{new}-\lambda_b)$,
+           $\boldsymbol{\hat{u}}\,\lambda_b^{new}/\lambda_b$ on the first
+           step;
            Newton-Raphson in the reduced basis
            (Eq.~\ref{eq:reduced-newton})
     \State \textbf{on failure} $\eta \gets \eta/2$
@@ -1207,9 +1367,10 @@ amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
 \EndFor
 \State $\boldsymbol{\hat{u}}_{,\lambda}$ from Eq.~\ref{eq:udot};
        $\boldsymbol{\hat{u}}_{,\lambda\lambda}$ from Eq.~\ref{eq:uddot}
-\State assemble $\phi_2,\phi_3,\phi_4,\phi_{20},\phi_{30},\phi_{200}$
+\State assemble $\phi_2,\phi_3,\phi_4,\phi_{20},\phi_{30},\phi_{200}$,
+       all the modes at once (Section~\ref{sec:vectorization})
 \State $a_{ijk}$ from Eq.~\ref{eq:a-coefficient}
-\State $\boldsymbol{\bar{u}}_{ij}$ from the bordered system
+\State $\boldsymbol{\bar{u}}_{ij}$, $i \le j$, from the bordered system
        Eq.~\ref{eq:bordered} with the weighted condition
        Eq.~\ref{eq:condition}
 \State $b_{ijkl}$ from Eq.~\ref{eq:b-coefficient}
@@ -1224,7 +1385,11 @@ amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
 The two verification cases are the composite cylinder of Sun~\S3.1 and the
 NASA shell AW-CYL-1-1 of \citet{arbocz2001}; they are
 the same shell, so the ANILISA $n$-search of the latter provides reference
-values for both.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
+values for both.  The two are nevertheless not computed alike: the Sun rows
+below use Sanders kinematics and $n_x = 11$ at $n_y = 40$, the Arbocz rows von
+K\'arm\'an kinematics and $n_x = 17$ at $n_y = 40$
+(\texttt{tests/test\_koiter\_cylinder\_newton\_raphson.py}), which is what
+separates the two rows with the same $n_y$ and $n$.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
 \left(r\sqrt{3(1-\nu_{12}^2)}\right)$.
 
 \subsection{Buckling loads}
@@ -1302,7 +1467,8 @@ harmonic stands $17$ per cent above the critical one and that of $2n$ $78$ to
 $80$ per cent above it, so there is none.
 
 \emph{Expansion point.}  The expansion is made at $\lambda_b/\lambda_c
-\simeq 0.9968$, the default \texttt{NLprebuck\_eps1}.  On the $n_y = 60$,
+\simeq 0.9968$, the ratio reached with the default
+\texttt{NLprebuck\_eps1} $= 0.005$.  On the $n_y = 60$,
 $n_x = 51$ mesh, $\lambda_b/\lambda_c = 0.9991$ moves $b_{1111}$ from $-0.35739$
 to $-0.35434$ and $\lambda_c$ from $0.329244$ to $0.328830$; extrapolated
 linearly to $\lambda_b = \lambda_c$ they become $-0.3532$ and $0.32867$.  The
@@ -1364,8 +1530,9 @@ character, so only what is specific to the CTS model is documented here.
 \label{sec:cts-axi}
 
 The parameterisation steers the tows along the \emph{axial} direction only,
-$\theta = \theta(x)$, and the tow shearing thickens the laminate as
-$h_{tow}/\cos\theta$, again a function of $x$ alone.  The stiffness is
+$\theta = \theta(x)$, and the tow shearing thickens each ply as
+$h_{tow}/\cos\theta$, or as $h_{tow}/\cos(\theta - \theta_{c1})$ with
+\texttt{idealistic\_CTS=True}, again a function of $x$ alone.  The stiffness is
 therefore uniform around the circumference, the cyclic shift of
 Section~\ref{sec:axisymmetric} remains a symmetry of every assembled operator,
 and the fundamental path of the perfect cylinder under uniform axial
@@ -1507,8 +1674,8 @@ edge restraint would lead one to expect.  The critical wave number settles at
 $n = 7$ from $n_y = 45$ upwards instead of wandering.  And $b_{1111}$
 \emph{converges}: $-0.179$, $-0.156$, $-0.151$, monotonically and without
 changing sign, to within $3.3$ per cent at $n_y = 60$, where the linear
-analysis of Section~\ref{sec:cts-convergence} produced two orders of
-magnitude of sign-changing noise on the same meshes.  The post-buckling
+analysis of Section~\ref{sec:cts-convergence} produced sign-changing noise
+spanning more than an order of magnitude on the same meshes.  The post-buckling
 coefficient of a CTS cylinder is therefore a computable quantity, but only
 about a non-linear pre-buckling state.
 
@@ -1649,7 +1816,10 @@ harmonic content of the critical mode, never the convergence history.
         problem per step.  In a design-of-experiments loop over thousands of
         samples, as the reference performs, this is the binding constraint,
         and the screening run of item~1 is the part worth doing on every
-        sample.
+        sample.  The Koiter section itself adds about $17$~ms per element with
+        five modes at $n_y = 160$, about a third of the rest of a
+        \texttt{NLprebuck=True} run, almost all of it in the bordered solves
+        (Section~\ref{sec:vectorization}).
 \end{enumerate}
 
 %==============================================================================
@@ -1659,8 +1829,9 @@ harmonic content of the critical mode, never the convergence history.
 
 \begin{enumerate}\itemsep3pt
   \item \textbf{Degenerate critical modes.}  The rotation inside the
-        degenerate pair still moves $b_{1111}$ by sixteen per cent on the
-        $n_y = 40$ mesh, almost all of it through the nodal normalisation
+        degenerate pair still moves $b_{1111}$ by $16$ and $22$ per cent on
+        the $n_y = 40$ meshes of the Sun and Arbocz shells, almost all of it
+        through the nodal normalisation
         (Section~\ref{sec:normalisation}).  The canonicalisation of
         Section~\ref{sec:canonical} makes the choice reproducible rather than
         arbitrary; it does not make it converged.  The bordered system no
@@ -1692,6 +1863,27 @@ harmonic content of the critical mode, never the convergence history.
         inside a degenerate pair, so neither point affects the reference
         cases; both would matter for an asymmetric bifurcation, and the
         second also for two retained modes with the same wave number.
+        Eq.~\ref{eq:b-coefficient} is also not index-symmetric, which
+        \texttt{multimode\_b\_symmetry.py} takes apart on the Waters shell
+        with three modes; the implementation reproduces it unchanged.  It is
+        symmetric under $j \leftrightarrow l$ but not under
+        $j \leftrightarrow k$, because of its two pairings
+        $3\,\phi_{3,ij}\cdot\boldsymbol{\bar{u}}_{kl} +
+        3\,\phi_{3,il}\cdot\boldsymbol{\bar{u}}_{jk}$ in place of the three
+        $2\,(\phi_{3,ij}\cdot\boldsymbol{\bar{u}}_{kl} +
+        \phi_{3,ik}\cdot\boldsymbol{\bar{u}}_{jl} +
+        \phi_{3,il}\cdot\boldsymbol{\bar{u}}_{jk})$.  Symmetrised over $j$, $k$
+        and $l$, it equals the three-pairing form to $10^{-15}$, so the two
+        agree wherever $b_{ijkl}$ is contracted with $\xi_j\xi_k\xi_l$, as in
+        the amplitude equations, and for $i = j = k = l$; single entries do
+        not, $b_{1122}$ being $-0.125$ against $-0.102$ symmetrised with
+        \texttt{NLprebuck=True}.  Its dependence on $i$ is the per-equation
+        factor $-1/(6\lambda_i\,\phi_{20,i}\cdot\delta\boldsymbol{\bar{u}}_i)$:
+        multiplied back by it and symmetrised over $j$, $k$ and $l$, the
+        coefficients are symmetric in all four indices to about $10^{-10}$, the size
+        of the terms in $a_{ijk}$.  Those terms have irregular index patterns,
+        $a_{iij}a_{ikl}$ appearing twice, which nothing checks as long as
+        $a_{ijk}$ vanishes.
   \item \textbf{Axisymmetric critical modes.}  The reduction of the
         pre-buckling problem to the axisymmetric subspace
         (Section~\ref{sec:axisymmetric}) assumes that no buckling mode lies
@@ -1789,6 +1981,12 @@ script & produces & runtime \\
   & Sections~\ref{sec:canonical} and \ref{sec:secondorder} & $\sim$7~min \\
 \texttt{quadrature\_convergence.py}
   & Section~\ref{sec:limits} & $\sim$10~min \\
+\texttt{element\_loop\_timing.py}
+  & Section~\ref{sec:vectorization} & $\sim$1~min \\
+\texttt{bordered\_roundoff\_floor.py}
+  & Section~\ref{sec:vectorization} & $\sim$2~min \\
+\texttt{multimode\_b\_symmetry.py}
+  & Section~\ref{sec:limits} & $\sim$2~min \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1827,16 +2025,16 @@ test & shell & reference \\
   & \citet{sun2020}; \citet{arbocz2001} \\
 \texttt{test\_koiter\_cylinder\_Waters.py}
   & Waters shell
-  & Arbocz and Starnes (2002) \\
+  & \citet{arbocz2002} \\
 \texttt{test\_koiter\_cylinder\_Waters\_sanders.py}
   & Waters shell
-  & Arbocz and Starnes (2002) \\
+  & \citet{arbocz2002} \\
 \texttt{test\_koiter\_cylinder\_CTS.py}
   & CTS, constant-stiffness limit
-  & \citet{dossantos2022} \\
+  & cross-check against \texttt{koiter\_cylinder.py} \\
 \texttt{test\_koiter\_cylinder\_CTS\_sanders.py}
   & CTS, constant-stiffness limit
-  & \citet{dossantos2022} \\
+  & cross-check against \texttt{koiter\_cylinder\_sanders.py} \\
 \texttt{test\_buckling\_mode\_cluster.py}
   & Sun~\S3.1
   & Section~\ref{sec:howmany} \\
@@ -1852,18 +2050,27 @@ test & shell & reference \\
 \texttt{test\_cts\_shares\_nlprebuck\_algorithm.py}
   & ---
   & source parity \\
+\texttt{test\_koiter\_tensors.py}
+  & random elements
+  & the loops of version 0.3.2, Section~\ref{sec:vectorization} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-The last of these compares the CTS and the constant-stiffness modules
-character by character over the regions that implement the algorithm of this
-document.  The algorithm was spliced from one into the other rather than
-retyped, and that test is what keeps the two from diverging silently; the
-mesh generation, the per-integration-point $ABD$ of a variable-stiffness
-laminate, and the CTS-specific commentary are deliberately excluded from the
-comparison.
+The last two need a note.  \texttt{test\_cts\_shares\_nlprebuck\_algorithm.py}
+compares the four models character by character over the regions that
+implement the algorithm of this document: the pre-buckling solver and the
+iterative eigenvalue algorithm, and the whole Koiter section, which are
+identical in all four, and \texttt{nonlinear\_rows}, identical in the two
+models of each kinematics.  The algorithm was spliced from one model into
+the others rather than retyped, and that test is what keeps them from
+diverging silently; the mesh generation, the per-integration-point $ABD$ of a
+variable-stiffness laminate, and the CTS-specific commentary are deliberately
+excluded from the comparison.  \texttt{test\_koiter\_tensors.py} checks
+\texttt{koiter\_tensors.py}, which the four models call, against the Python
+loops it replaced, kept in the test as they were in version 0.3.2
+(Section~\ref{sec:vectorization}).
 
 %==============================================================================
 \bibliographystyle{plainnat}
