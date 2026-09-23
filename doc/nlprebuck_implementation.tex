@@ -39,7 +39,7 @@ the arbitrariness left by the degenerate buckling modes, and the
 stiffness-weighted orthogonality condition imposed on the second-order
 fields, and the mesh resolution the continuous-tow-shearing cylinders
 require.
-The notation follows the finite element chapter of \citet{castro2023}.  Equation
+The notation follows Chapter~7 of \citet{degenhardt2017}.  Equation
 numbers of the form ``Sun~Eq.~(nn)'' refer to \citet{sun2020}.
 \end{abstract}
 
@@ -554,7 +554,9 @@ and caps the step at a fraction $f$ of the permissible value:
 	\qquad f = 0.7
 \end{equation}
 
-Substituting Eq.~\ref{eq:eta-capped} into Eq.~\ref{eq:step-overshoot} gives
+Whenever the cap is active, that is, for $s < 0$ and $f/(1-s) < \eta$, which
+is $s < -0.4$ for the fixed $\eta = 0.5$, substituting
+Eq.~\ref{eq:eta-capped} into Eq.~\ref{eq:step-overshoot} gives
 $\lambda_b' - \lambda_c' = -(1-f)\,(\lambda_c - \lambda_b)$ whatever the value
 of $s$, so the cap does not merely prevent the overshoot: it turns
 Eq.~\ref{eq:step} into a secant iteration on $\lambda_c(\lambda_b) -
@@ -583,8 +585,11 @@ whatever the overshoot.  The distance is therefore taken in absolute value:
 \end{equation}
 
 If the load level lands past the bifurcation point by more than
-$\varepsilon_1$, the load step is taken again from the previous state with
-$\eta$ halved.  The fundamental path is still computable there, the
+$\varepsilon_1$, the load step is taken again from the previous state with a
+cap on $\eta$ that starts at $1$ and is halved at every overshoot, so that
+after the $k$-th overshoot $\eta \le 2^{-k}$.  The first retry therefore
+repeats the step unchanged whenever $\eta \le 0.5$ already, which is the case
+from the second load step on, and only the following ones take it shorter.  The fundamental path is still computable there, the
 pre-buckling solve being restricted to the axisymmetric subspace, but the
 expansion is meant to be made on the near side of it.
 
@@ -1108,7 +1113,7 @@ not.
 Eq.~\ref{eq:condition} without the tensors the model assembles.  The first
 comes from a central difference of the tangent of the compiled element along
 $\boldsymbol{\hat{u}}_{,\lambda}$, which is exact because
-$\boldsymbol{K}_{C0} + \boldsymbol{K}_C^{NL}(\boldsymbol{u}) +
+$\boldsymbol{K}_0 + \boldsymbol{K}_C^{NL}(\boldsymbol{u}) +
 \boldsymbol{K}_G(\boldsymbol{u})$ is quadratic in $\boldsymbol{u}$.  The
 second comes from integrating Eq.~\ref{eq:cconst} with the strain operators
 of the element.  The test checks that the condition holds, for both
@@ -1197,7 +1202,9 @@ amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
   \Repeat
     \State $\lambda_b^{new} \gets \lambda_b + \eta(\lambda_c-\lambda_b)$
     \State predictor $\boldsymbol{\hat{u}} +
-           \boldsymbol{\hat{u}}_{,\lambda}(\lambda_b^{new}-\lambda_b)$;
+           \boldsymbol{\hat{u}}_{,\lambda}(\lambda_b^{new}-\lambda_b)$,
+           $\boldsymbol{\hat{u}}\,\lambda_b^{new}/\lambda_b$ on the first
+           step;
            Newton-Raphson in the reduced basis
            (Eq.~\ref{eq:reduced-newton})
     \State \textbf{on failure} $\eta \gets \eta/2$
@@ -1224,7 +1231,11 @@ amplitude of the radial displacement instead, Section~\ref{sec:normalisation}.
 The two verification cases are the composite cylinder of Sun~\S3.1 and the
 NASA shell AW-CYL-1-1 of \citet{arbocz2001}; they are
 the same shell, so the ANILISA $n$-search of the latter provides reference
-values for both.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
+values for both.  The two are nevertheless not computed alike: the Sun rows
+below use Sanders kinematics and $n_x = 11$ at $n_y = 40$, the Arbocz rows von
+K\'arm\'an kinematics and $n_x = 17$ at $n_y = 40$
+(\texttt{tests/test\_koiter\_cylinder\_newton\_raphson.py}), which is what
+separates the two rows with the same $n_y$ and $n$.  Buckling loads are normalised by $N_{c\ell} = E_{11}h^2 /
 \left(r\sqrt{3(1-\nu_{12}^2)}\right)$.
 
 \subsection{Buckling loads}
@@ -1302,7 +1313,8 @@ harmonic stands $17$ per cent above the critical one and that of $2n$ $78$ to
 $80$ per cent above it, so there is none.
 
 \emph{Expansion point.}  The expansion is made at $\lambda_b/\lambda_c
-\simeq 0.9968$, the default \texttt{NLprebuck\_eps1}.  On the $n_y = 60$,
+\simeq 0.9968$, the ratio reached with the default
+\texttt{NLprebuck\_eps1} $= 0.005$.  On the $n_y = 60$,
 $n_x = 51$ mesh, $\lambda_b/\lambda_c = 0.9991$ moves $b_{1111}$ from $-0.35739$
 to $-0.35434$ and $\lambda_c$ from $0.329244$ to $0.328830$; extrapolated
 linearly to $\lambda_b = \lambda_c$ they become $-0.3532$ and $0.32867$.  The
@@ -1364,8 +1376,9 @@ character, so only what is specific to the CTS model is documented here.
 \label{sec:cts-axi}
 
 The parameterisation steers the tows along the \emph{axial} direction only,
-$\theta = \theta(x)$, and the tow shearing thickens the laminate as
-$h_{tow}/\cos\theta$, again a function of $x$ alone.  The stiffness is
+$\theta = \theta(x)$, and the tow shearing thickens each ply as
+$h_{tow}/\cos\theta$, or as $h_{tow}/\cos(\theta - \theta_{c1})$ with
+\texttt{idealistic\_CTS=True}, again a function of $x$ alone.  The stiffness is
 therefore uniform around the circumference, the cyclic shift of
 Section~\ref{sec:axisymmetric} remains a symmetry of every assembled operator,
 and the fundamental path of the perfect cylinder under uniform axial
@@ -1507,8 +1520,8 @@ edge restraint would lead one to expect.  The critical wave number settles at
 $n = 7$ from $n_y = 45$ upwards instead of wandering.  And $b_{1111}$
 \emph{converges}: $-0.179$, $-0.156$, $-0.151$, monotonically and without
 changing sign, to within $3.3$ per cent at $n_y = 60$, where the linear
-analysis of Section~\ref{sec:cts-convergence} produced two orders of
-magnitude of sign-changing noise on the same meshes.  The post-buckling
+analysis of Section~\ref{sec:cts-convergence} produced sign-changing noise
+spanning more than an order of magnitude on the same meshes.  The post-buckling
 coefficient of a CTS cylinder is therefore a computable quantity, but only
 about a non-linear pre-buckling state.
 
@@ -1659,8 +1672,9 @@ harmonic content of the critical mode, never the convergence history.
 
 \begin{enumerate}\itemsep3pt
   \item \textbf{Degenerate critical modes.}  The rotation inside the
-        degenerate pair still moves $b_{1111}$ by sixteen per cent on the
-        $n_y = 40$ mesh, almost all of it through the nodal normalisation
+        degenerate pair still moves $b_{1111}$ by $16$ and $22$ per cent on
+        the $n_y = 40$ meshes of the Sun and Arbocz shells, almost all of it
+        through the nodal normalisation
         (Section~\ref{sec:normalisation}).  The canonicalisation of
         Section~\ref{sec:canonical} makes the choice reproducible rather than
         arbitrary; it does not make it converged.  The bordered system no
@@ -1827,16 +1841,16 @@ test & shell & reference \\
   & \citet{sun2020}; \citet{arbocz2001} \\
 \texttt{test\_koiter\_cylinder\_Waters.py}
   & Waters shell
-  & Arbocz and Starnes (2002) \\
+  & \citet{arbocz2002} \\
 \texttt{test\_koiter\_cylinder\_Waters\_sanders.py}
   & Waters shell
-  & Arbocz and Starnes (2002) \\
+  & \citet{arbocz2002} \\
 \texttt{test\_koiter\_cylinder\_CTS.py}
   & CTS, constant-stiffness limit
-  & \citet{dossantos2022} \\
+  & cross-check against \texttt{koiter\_cylinder.py} \\
 \texttt{test\_koiter\_cylinder\_CTS\_sanders.py}
   & CTS, constant-stiffness limit
-  & \citet{dossantos2022} \\
+  & cross-check against \texttt{koiter\_cylinder\_sanders.py} \\
 \texttt{test\_buckling\_mode\_cluster.py}
   & Sun~\S3.1
   & Section~\ref{sec:howmany} \\
