@@ -1,0 +1,51 @@
+# nmax 10.207920398555467
+# param_t 0.05877788781394755
+# param_c1 0.023352860719629432
+# param_c2 0.1532531484725681
+# nxt 7
+# nxc 3
+# nxs 18
+# rCTS 0.148
+# param_n 4
+# c2_ratio 0.84
+# thetadeg_c1 50.0
+# thetadeg_c2 73.4
+# nx 127
+# ny 160
+# number of elements 20160
+# numbers of DOF 203200
+# starting element assembly
+# finished element assembly
+# starting static analysis
+#    initiating nonlinear pre-buckling state
+# starting iterative eigenvalue analysis
+#    iteration 1 lambda_b 1.0 lambda_c 5.190755120681756 lambda_b/lambda_c 0.1926501976592299
+#        iteration 0 crisfield_test 0.5855179338735376
+#    Newton-Raphson failed, backing off to eta 0.4
+#        iteration 0 crisfield_test 0.18385015812614663
+#        iteration 1 crisfield_test 0.1827872474450731
+#        iteration 2 crisfield_test 0.0020286844963030713
+#        iteration 3 crisfield_test 2.4073172625045468e-05
+#    iteration 2 lambda_b 2.676302048272703 lambda_c 3.3498368854734974 lambda_b/lambda_c 0.7989350346813705
+#        iteration 0 crisfield_test 0.0006732401618819784
+#        iteration 1 crisfield_test 4.5981832949469515e-06
+#    iteration 3 lambda_b 2.90100605181203 lambda_c 3.4177158028447887 lambda_b/lambda_c 0.8488143014692248
+#        iteration 0 crisfield_test 0.001814221418275619
+#        iteration 1 crisfield_test 5.7065187231442105e-05
+#    iteration 4 lambda_b 3.159360927328409 lambda_c 3.5249669305329814 lambda_b/lambda_c 0.896281011876247
+#        iteration 0 crisfield_test 0.0009224153090940203
+#        iteration 1 crisfield_test 2.333927781784841e-05
+#    iteration 5 lambda_b 3.3421639289306952 lambda_c 3.618835401539596 lambda_b/lambda_c 0.9235468204795405
+#        iteration 0 crisfield_test 0.0005269153699759479
+#        iteration 1 crisfield_test 1.134169108802551e-05
+#    iteration 6 lambda_b 3.4804996652351456 lambda_c 3.615291835390688 lambda_b/lambda_c 0.9627161025187401
+#        iteration 0 crisfield_test 5.1630641499059255e-05
+#    iteration 7 lambda_b 3.547895750312917 lambda_c 3.5708655744469313 lambda_b/lambda_c 0.9935674352184003
+#        iteration 0 crisfield_test 2.738966321143745e-07
+#    iteration 8 lambda_b 3.5575865982842303 lambda_c 3.5656868390604473 lambda_b/lambda_c 0.9977282803729474
+#    converged
+# finished eigenvalue analysis
+# finished static analysis
+# load_mult [3.56568684 3.56568684 3.5728387  3.5728387  3.57368233 3.57368233
+ 3.59421453 3.59421453 3.59726812 3.59726812 3.62862172 3.56568684]
+# critical buckling load 8961.54846287529
