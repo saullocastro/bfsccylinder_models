@@ -1,6 +1,4 @@
 import gc
-from functools import partial
-from collections import defaultdict
 
 try:
     from pypardiso import spsolve
@@ -19,8 +17,25 @@ from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
         axisymmetric_basis, project_axisymmetric, canonical_modes,
         degenerate_partner)
+from bfsccylinder_models.koiter_tensors import koiter_element_tensors
 
 num_nodes = 4
+
+
+def nonlinear_rows(elem, xi, eta):
+    """Rows (G1, G2) of the nonlinear membrane strains at (xi, eta)
+
+    eps_xx^NL = 1/2 (G1 u)**2, eps_yy^NL = 1/2 (G2 u)**2 and
+    gamma_xy^NL = (G1 u) (G2 u), see koiter_element_tensors. Von Karman
+    kinematics
+    """
+    elem.update_Sw_x(xi, eta)
+    elem.update_Sw_y(xi, eta)
+    Sw_x = np.asarray(elem.Sw_x)
+    Sw_y = np.asarray(elem.Sw_y)
+    G1 = Sw_x
+    G2 = Sw_y
+    return G1, G2
 
 
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
@@ -532,10 +547,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     for modei in range(koiter_num_modes):
         lambda_a[modei] = load_mult[modei]
 
-    es = partial(np.einsum, optimize='greedy', casting='no')
-    #from opt_einsum import contract
-    #es = partial(contract)
-
     #NOTE the largest nodal translation of every mode made equal to h; the
     #     reference coefficients use the crest amplitude of w instead, see
     #     "Normalising the modes" in doc/nlprebuck_implementation.tex
@@ -592,31 +603,6 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         ucond[col] = v
     num_cond = len(ucond)
 
-    phi4 = defaultdict(lambda: 0)
-    phi3_ab = {}
-    phi30_ab = {}
-    cst_ab = {}
-    phi3e_ab = {}
-    phi30e_ab = {}
-    cste_ab = {}
-    phi20e_a = {}
-    phi20_a = {}
-    #phi2 = np.zeros((N, N))
-    phi200_ab = {}
-    for modei in range(num_cond):
-        phi20_a[modei] = np.zeros(N)
-        phi20e_a[modei] = np.zeros(num_nodes*DOF)
-    for modei in range(koiter_num_modes):
-        for modej in range(koiter_num_modes):
-            phi200_ab[(modei, modej)] = 0
-            phi3_ab[(modei, modej)] = np.zeros(N)
-            phi30_ab[(modei, modej)] = np.zeros(N)
-            cst_ab[(modei, modej)] = np.zeros(N)
-            phi3e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
-            phi30e_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
-            cste_ab[(modei, modej)] = np.zeros(num_nodes*DOF)
-
-
     #NOTE this flag multiplies every nonlinear contribution to the
     #     pre-buckling strains and to their derivatives. With NLprebuck=False
     #     the pre-buckling state is the linear elastic solution, the
@@ -627,235 +613,21 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     # higher-order tensors for elements
 
-    u0e = np.zeros(num_nodes*DOF, dtype=np.float64)
-    u0dote = np.zeros(num_nodes*DOF, dtype=np.float64)
-    u0ddote = np.zeros(num_nodes*DOF, dtype=np.float64)
-    Aij = prop.A
-    Bij = prop.B
-    #Dij = prop.D
-    for count, elem in enumerate(elements):
-        if count % (num_elements//5) == 0:
-            print('#    count', count+1, num_elements)
-        eiab = np.zeros((3, num_nodes*DOF, num_nodes*DOF))
+    #NOTE integrated by koiter_element_tensors, common to the four models,
+    #     for all the Koiter modes at once; only the kinematics,
+    #     nonlinear_rows, and the stiffness, calc_AB, are the model's own.
+    #     phi3_ab[(a, b)] is phi3[:, a, b], phi20_a[k] is phi20[:, k], and
+    #     likewise for phi30, cst, phi200 and phi4
+    U = np.column_stack([ua[modek] for modek in range(koiter_num_modes)])
+    Ucond = np.column_stack([ucond[modek] for modek in range(num_cond)])
 
-        c1 = elem.c1
-        c2 = elem.c2
-        c3 = elem.c3
-        c4 = elem.c4
+    def calc_AB(elem):
+        #NOTE the same laminate in every element
+        return prop.A, prop.B
 
-        u0e *= 0
-        u0dote *= 0
-        u0ddote *= 0
-        for i in range(DOF):
-            u0e[0*DOF + i] = u0[c1 + i]
-            u0e[1*DOF + i] = u0[c2 + i]
-            u0e[2*DOF + i] = u0[c3 + i]
-            u0e[3*DOF + i] = u0[c4 + i]
-            u0dote[0*DOF + i] = u0dot[c1 + i]
-            u0dote[1*DOF + i] = u0dot[c2 + i]
-            u0dote[2*DOF + i] = u0dot[c3 + i]
-            u0dote[3*DOF + i] = u0dot[c4 + i]
-            u0ddote[0*DOF + i] = u0ddot[c1 + i]
-            u0ddote[1*DOF + i] = u0ddot[c2 + i]
-            u0ddote[2*DOF + i] = u0ddot[c3 + i]
-            u0ddote[3*DOF + i] = u0ddot[c4 + i]
-
-        #NOTE the Koiter modes, followed by the remaining directions of the
-        #     null space of phi2, for which only phi20_a is needed
-        uae = {}
-        for modei in range(num_cond):
-            uae[modei] = np.zeros(num_nodes*DOF, dtype=np.float64)
-            for i in range(DOF):
-                uae[modei][0*DOF + i] = ucond[modei][c1 + i]
-                uae[modei][1*DOF + i] = ucond[modei][c2 + i]
-                uae[modei][2*DOF + i] = ucond[modei][c3 + i]
-                uae[modei][3*DOF + i] = ucond[modei][c4 + i]
-
-        ube = uce = ude = uae
-
-        indices = []
-        cs = [c1, c2, c3, c4]
-        for ci in cs:
-            for i in range(DOF):
-                indices.append(ci + i)
-
-        lex = elem.lex
-        ley = elem.ley
-
-        for modei in range(num_cond):
-            phi20e_a[modei] *= 0
-        for modei in range(koiter_num_modes):
-            for modej in range(koiter_num_modes):
-                phi3e_ab[(modei, modej)] *= 0
-                phi30e_ab[(modei, modej)] *= 0
-                cste_ab[(modei, modej)] *= 0
-
-        #phi2e = np.zeros((num_nodes*DOF, num_nodes*DOF))
-
-        for i in range(nint):
-            xi = points[i]
-            weight_xi = weights[i]
-            for j in range(nint):
-                eta = points[j]
-                weight_eta = weights[j]
-                weight = weight_xi * weight_eta
-
-                elem.update_Sw_x(xi, eta)
-                elem.update_Sw_y(xi, eta)
-                elem.update_Bm(xi, eta)
-                elem.update_Bb(xi, eta)
-
-                Sw_x = np.atleast_2d(elem.Sw_x)
-                Sw_y = np.atleast_2d(elem.Sw_y)
-
-                #NOTE the pre-buckling STATE and its first and second RATES
-                #     with respect to the load parameter are independent
-                #     fields. Writing w0_x_s = lambda*w0_x_d, as an exactly
-                #     linear pre-buckling path would allow, is what makes the
-                #     nonlinear pre-buckling behaviour disappear
-                w0_x_s = Sw_x[0] @ u0e
-                w0_y_s = Sw_y[0] @ u0e
-                w0_x_d = Sw_x[0] @ u0dote
-                w0_y_d = Sw_y[0] @ u0dote
-                w0_x_dd = Sw_x[0] @ u0ddote
-                w0_y_dd = Sw_y[0] @ u0ddote
-
-                Bm = np.asarray(elem.Bm)
-                Bb = np.asarray(elem.Bb)
-
-                #NOTE eps_dot, the first derivative of the pre-buckling strain
-                #     with respect to the load parameter, d/dl of
-                #     Bm u + [w,x**2/2, w,y**2/2, w,x w,y]
-                ei0 = ej0 = Bm @ u0dote + flag*np.array([
-                        w0_x_s*w0_x_d,
-                        w0_y_s*w0_y_d,
-                        w0_x_s*w0_y_d + w0_y_s*w0_x_d])
-                ki0 = kj0 = Bb @ u0dote
-
-                #NOTE eps_dot_dot, the second derivative
-                ei00 = ej00 = Bm @ u0ddote + flag*np.array([
-                        w0_x_d**2 + w0_x_s*w0_x_dd,
-                        w0_y_d**2 + w0_y_s*w0_y_dd,
-                        2*w0_x_d*w0_y_d + w0_x_s*w0_y_dd + w0_y_s*w0_x_dd])
-                ki00 = kj00 = Bb @ u0ddote
-
-                Ni0 = Aij@ej0 + Bij@kj0
-                Ni00 = Aij@ej00 + Bij@kj00
-
-                #NOTE d(eps)/d(u_a) at the pre-buckling state
-                eia = eib = eic = Bm + flag*np.array([w0_x_s*Sw_x[0],
-                                                      w0_y_s*Sw_y[0],
-                                                      w0_x_s*Sw_y[0] + w0_y_s*Sw_x[0]])
-
-                kia = kib = kic = Bb
-
-                Nia = Nib = Nic = es('ij,ja->ia', Aij, eia) + es('ij,ja->ia', Bij, kia)
-                #Mia = Mib = es('ij,ja->ia', Bij, eia) + es('ij,ja->ia', Dij, kia)
-
-                #NOTE d2(eps)/dl d(u_a)
-                eia0 = eib0 = eic0 = flag*np.array([w0_x_d*Sw_x[0],
-                                                    w0_y_d*Sw_y[0],
-                                                    w0_x_d*Sw_y[0] + w0_y_d*Sw_x[0]])
-
-                Nia0 = Nib0 = Nic0 = es('ij,ja->ia', Aij, eia0)
-                Mia0 = Mib0 = es('ij,ja->ia', Bij, eia0)
-
-                eiab[0] = Sw_x.T @ Sw_x
-                eiab[1] = Sw_y.T @ Sw_y
-                eiab[2] = Sw_x.T @ Sw_y + Sw_y.T @ Sw_x
-
-                eicd = eibd = eibc = eiad = eiac = eiab
-
-                Niab = Niac = Niad = Nibc = Nibd = Nicd = es('ij,jab->iab', Aij, eiab)
-                Miab = Miac = Mibc = es('ij,jab->iab', Bij, eiab)
-
-                #phi2e += 1/2.*weight*(lex*ley/4.)*(
-                           #  es('iab,i->ab', Niab, ei) #NOTE this is KG
-                           #+ es('ia,ib->ab', Nia, eib)
-                           #+ es('ib,ia->ab', Nib, eia)
-                           #+ es('i,iab->ab', Ni, eiab) #NOTE this is KG
-                           #+ es('iab,i->ab', Miab, ki) #NOTE this is KG
-                           #+ es('ia,ib->ab', Mia, kib)
-                           #+ es('ib,ia->ab', Mib, kia)
-                        #)
-
-                for modei in range(num_cond):
-                    ua1 = uae[modei]
-                    phi20e_a[modei] += 1/2.*weight*(lex*ley/4.)*(
-                            (ei0 @ (Niab @ ua1))
-                         +  ((Nia0 @ ua1) @ eib)
-                         +  ((Nia @ ua1) @ eib0)
-                         +  ((eia @ ua1) @ Nib0)
-                         +  ((eia0 @ ua1) @ Nib)
-                         +  (Ni0 @ (eiab @ ua1))
-                         +  (ki0 @ (Miab @ ua1))
-                         +  ((Mia0 @ ua1) @ kib)
-                         +  ((kia @ ua1) @ Mib0)
-                    )
-
-                for modei in range(koiter_num_modes):
-                    ua1 = uae[modei]
-                    for modej in range(koiter_num_modes):
-                        ub2 = ube[modej]
-                        phi200_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
-                                es('iab,i,a,b', Niab, ei00, ua1, ub2)
-                            + 2*es('ia,ib,a,b', Nia0, eib0, ua1, ub2)
-                            + 2*es('ib,ia,a,b', Nib0, eia0, ua1, ub2)
-                              + es('i,iab,a,b', Ni00, eiab, ua1, ub2)
-                            )
-                        phi3e_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
-                              (((Niab @ ub2) @ ua1) @ eic)
-                            + ((eib @ ub2) @ (Niac @ ua1))
-                            + ((Nia @ ua1) @ (eibc @ ub2))
-                            + ((eia @ ua1) @ (Nibc @ ub2))
-                            + ((Nib @ ub2) @ (eiac @ ua1))
-                            + (((eiab @ ub2) @ ua1) @ Nic)
-                            + (((Miab @ ub2) @ ua1) @ kic)
-                            + ((kib @ ub2) @ (Miac @ ua1))
-                            + ((kia @ ua1) @ (Mibc @ ub2))
-                            )
-                        phi30e_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
-                              es('iab,ic,a,b', Niab, eic0, ua1, ub2)
-                            + es('iac,ib,a,b', Niac, eib0, ua1, ub2)
-                            + es('ia,ibc,a,b', Nia0, eibc, ua1, ub2)
-                            + es('ibc,ia,a,b', Nibc, eia0, ua1, ub2)
-                            + es('ib,iac,a,b', Nib0, eiac, ua1, ub2)
-                            + es('ic,iab,a,b', Nic0, eiab, ua1, ub2)
-                            )
-                        #NOTE 1/2 <N[L2(ua, ub)], L11(u0_dot, .)>, the
-                        #     constant of the orthogonality conditions, see
-                        #     the bordered system below. Its integrand equals
-                        #     the first, and the last, of the six terms of
-                        #     phi30e_ab
-                        cste_ab[(modei, modej)] += 1/2.*weight*(lex*ley/4.)*(
-                              es('iab,ic,a,b', Niab, eic0, ua1, ub2))
-
-                def fphi4(ua, ub, uc, ud):
-                    return 1/2.*weight*(lex*ley/4.)*(
-                          ((Niab @ ub) @ ua) @ ((eicd @ ud) @ uc)
-                        + ((Niac @ uc) @ ua) @ ((eibd @ ud) @ ub)
-                        + ((Niad @ ud) @ ua) @ ((eibc @ uc) @ ub)
-                        + ((Nibc @ uc) @ ub) @ ((eiad @ ud) @ ua)
-                        + ((Nibd @ ud) @ ub) @ ((eiac @ uc) @ ua)
-                        + ((Nicd @ ud) @ uc) @ ((eiab @ ub) @ ua)
-                        )
-
-                for modei in range(koiter_num_modes):
-                    for modej in range(koiter_num_modes):
-                        for modek in range(koiter_num_modes):
-                            for model in range(koiter_num_modes):
-                                phi4[(modei, modej, modek, model)] += fphi4(uae[modei], ube[modej], uce[modek], ude[model])
-
-        #tmp = np.zeros((N, num_nodes*DOF))
-        #tmp[indices] = phi2e
-        #phi2[:, indices] += tmp
-        for modei in range(num_cond):
-            phi20_a[modei][indices] += phi20e_a[modei]
-        for modei in range(koiter_num_modes):
-            for modej in range(koiter_num_modes):
-                phi3_ab[(modei, modej)][indices] += phi3e_ab[(modei, modej)]
-                phi30_ab[(modei, modej)][indices] += phi30e_ab[(modei, modej)]
-                cst_ab[(modei, modej)][indices] += cste_ab[(modei, modej)]
+    phi20, phi3, phi30, cst, phi200, phi4 = koiter_element_tensors(elements,
+            points, weights, u0, u0dot, u0ddot, Ucond, koiter_num_modes, flag,
+            nonlinear_rows, calc_AB)
 
     #NOTE phi2 must be the SAME operator whose null vector is the buckling
     #     mode, so it is built from the KC and KG of the eigenvalue analysis,
@@ -874,12 +646,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             phi2_ab[(modei, modej)] = left @ ua[modej]
 
     print('# a_ijk factors')
+    #NOTE phi3U[i, j, k] = phi3_ab[(i, j)] @ ua[k], in one product
+    phi3U = np.tensordot(phi3, U, axes=(0, 0))
     a_abc = {}
     for modei in range(koiter_num_modes):
         lambda_i = lambda_a[modei]
         for modej in range(koiter_num_modes):
             for modek in range(koiter_num_modes):
-                a_ijk = -1./(2*lambda_i)*(phi3_ab[(modei, modej)] @ ua[modek])/(phi20_a[modei] @ ua[modei])
+                a_ijk = -1./(2*lambda_i)*phi3U[modei, modej, modek]/(phi20[:, modei] @ ua[modei])
                 a_abc[(modei, modej, modek)] = a_ijk
                 print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)
     #NOTE the second order fields solve the terms of order xi_a xi_b of the
@@ -895,18 +669,12 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     z_l = lambda_l a_lab; on a cylinder phi3_ab @ ua[k] vanishes and this
     #     matters only for an asymmetric bifurcation. See "The singular
     #     system" in doc/nlprebuck_implementation.tex
-    Tkl = np.array([[phi20_a[modek] @ ua[model]
-                     for model in range(koiter_num_modes)]
-                    for modek in range(koiter_num_modes)])
-    force2ndorder_ij = {}
-    for modei in range(koiter_num_modes):
-        for modej in range(koiter_num_modes):
-            #NOTE phi3_ij = phi3_ji even in the asym case
-            force2ndorder_ij[(modei, modej)] = -1/2.*phi3_ab[(modei, modej)]
-            z = np.linalg.solve(Tkl, [-1/2.*(phi3_ab[(modei, modej)] @ ua[modek])
-                                      for modek in range(koiter_num_modes)])
-            for model in range(koiter_num_modes):
-                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]
+    Tkl = phi20[:, :koiter_num_modes].T @ U
+
+    def force2ndorder_ij(modei, modej):
+        #NOTE phi3_ij = phi3_ji even in the asym case
+        z = np.linalg.solve(Tkl, -1/2.*phi3U[modei, modej])
+        return -1/2.*phi3[:, modei, modej] - phi20[:, :koiter_num_modes] @ z
 
     #NOTE phi2 is singular by construction, the buckling modes spanning its
     #     null space, so the second order fields come from the bordered system
@@ -927,43 +695,60 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     expansion gave zero. See "Second-order fields and the orthogonality
     #     condition" in doc/nlprebuck_implementation.tex
     nu = int(bu.sum())
-    W = np.zeros((nu, num_cond))
-    for modek in range(num_cond):
-        W[:, modek] = phi20_a[modek][bu]
+    W = phi20[bu]
 
     bordered = bmat([[phi2uu, csc_matrix(Nsp)],
                      [csc_matrix(W).T, None]], format='csc')
 
+    #NOTE cstq[i, j, k] = cst_ab[(i, j)] @ ucond[k]
+    cstq = np.tensordot(cst, Ucond, axes=(0, 0))
+    #NOTE phi3_ab, cst_ab and hence the whole right hand side are symmetric
+    #     in a and b, so uab = uba and only the fields with a <= b are solved
+    #     for, m (m + 1)/2 solves instead of m**2. Solving for both gave
+    #     fields that differ by round off only, see "Cost of the element loop"
+    #     in doc/nlprebuck_implementation.tex
     uab = {}
     for modei in range(koiter_num_modes):
         for modej in range(koiter_num_modes):
+            if modej < modei:
+                uab[(modei, modej)] = uab[(modej, modei)]
+                continue
             rhs = np.zeros(nu + num_cond)
-            rhs[:nu] = force2ndorder_ij[(modei, modej)][bu]
-            for modek in range(num_cond):
-                rhs[nu + modek] = -(cst_ab[(modei, modej)] @ ucond[modek])
+            rhs[:nu] = force2ndorder_ij(modei, modej)[bu]
+            rhs[nu:] = -cstq[modei, modej]
             sol = spsolve(bordered, rhs)
             uijbar = np.zeros(N)
             uijbar[bu] = sol[:nu]
             uab[(modei, modej)] = uijbar
 
     print('# b_ijkl factors')
+    #NOTE phi3uab[i, j, k, l] = phi3_ab[(i, j)] @ uab[(k, l)] and
+    #     phi30U[i, k, l] = phi30_ab[(i, k)] @ ua[l], as matrix products
+    phi3uab = np.zeros((koiter_num_modes,)*4)
+    for (modek, model), uijbar in uab.items():
+        if model < modek:
+            phi3uab[:, :, modek, model] = phi3uab[:, :, model, modek]
+            continue
+        phi3uab[:, :, modek, model] = np.tensordot(phi3, uijbar,
+                axes=(0, 0))
+    phi30U = np.tensordot(phi30, U, axes=(0, 0))
     b_ijkl = {}
     for modei in range(koiter_num_modes):
-        phi20_i = phi20_a[modei]
+        phi20_i = phi20[:, modei]
         lambda_i = lambda_a[modei]
         for modej in range(koiter_num_modes):
             for modek in range(koiter_num_modes):
                 for model in range(koiter_num_modes):
                     b_ijkl[(modei, modej, modek, model)] = -1/(6*lambda_i*(phi20_i @ ua[modei]))*(
-                            phi4[(modei, modej, modek, model)]
-                            + 3*(phi3_ab[(modei, modej)] @ uab[(modek, model)])
-                            + 3*(phi3_ab[(modei, model)] @ uab[(modej, modek)])
+                            phi4[modei, modej, modek, model]
+                            + 3*phi3uab[modei, modej, modek, model]
+                            + 3*phi3uab[modei, model, modej, modek]
                             + lambda_i*(
-                                a_abc[(modei, modei, modej)]*(phi30_ab[(modei, modek)] @ ua[model])
-                               +a_abc[(modei, modej, modek)]*(phi30_ab[(modei, model)] @ ua[modei])
-                               +a_abc[(modei, modek, model)]*(phi30_ab[(modei, modei)] @ ua[modej])
+                                a_abc[(modei, modei, modej)]*phi30U[modei, modek, model]
+                               +a_abc[(modei, modej, modek)]*phi30U[modei, model, modei]
+                               +a_abc[(modei, modek, model)]*phi30U[modei, modei, modej]
                                 )
-                            + phi200_ab[(modei, modei)]*lambda_i**2*(
+                            + phi200[modei, modei]*lambda_i**2*(
                                 a_abc[(modei, modei, modej)]*a_abc[(modei, modek, model)]
                                +a_abc[(modei, modej, modek)]*a_abc[(modei, model, modei)]
                                +a_abc[(modei, modek, model)]*a_abc[(modei, modei, modej)]

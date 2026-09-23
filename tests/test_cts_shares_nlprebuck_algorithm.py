@@ -5,9 +5,11 @@ The algorithm was spliced from koiter_cylinder.py and koiter_cylinder_sanders.py
 into koiter_cylinder_CTS*.py rather than retyped, so that the two model families
 cannot drift apart. This test asserts that character for character, on the
 regions that are meant to be shared: the axisymmetric pre-buckling solver and
-the iterative eigenvalue algorithm, the flag note, the pre-buckling state and
-its rates in the Koiter tensors, phi2, the bordered system for the
-second-order fields, and the b_ijkl block.
+the iterative eigenvalue algorithm, the flag note, the kinematics of the Koiter
+tensors and the call that integrates them, phi2, the a_ijk, the bordered system
+for the second-order fields, and the b_ijkl block. The element integration of
+the Koiter tensors itself, the pre-buckling state and its rates included, is in
+koiter_tensors.py, which all four models call, so it is shared by construction.
 
 What is deliberately NOT shared, and so is not compared: the mesh generation
 of the CTS parameterization, the per-integration-point ABD of a
@@ -29,12 +31,18 @@ REGIONS = [
     ('    #NOTE this flag multiplies', '    flag = NLprebuck'),
     ('    #NOTE the null space of phi2, against which',
      '    num_cond = len(ucond)'),
+    ('def nonlinear_rows(elem, xi, eta):', '    return G1, G2'),
+    ('    #NOTE integrated by koiter_element_tensors',
+     '    Ucond = np.column_stack([ucond[modek] for modek in range(num_cond)])'),
+    ('    phi20, phi3, phi30, cst, phi200, phi4 = koiter_element_tensors(',
+     '            nonlinear_rows, calc_AB)'),
     ('    #NOTE phi2 must be the SAME operator', '    phi2uu = KCuu + KGuu*mu[0]'),
+    ("    print('# a_ijk factors')",
+     "                print('# $a_%d%d%d$' % (modei+1, modej+1, modek+1), a_ijk)"),
     ('    #NOTE the second order fields solve the terms of order',
-     '                force2ndorder_ij[(modei, modej)] -= z[model]*phi20_a[model]'),
+     '        return -1/2.*phi3[:, modei, modej] - phi20[:, :koiter_num_modes] @ z'),
     ('    #NOTE phi2 is singular by construction',
      '            uab[(modei, modej)] = uijbar'),
-    ('                #NOTE the pre-buckling STATE', '                Nia0 = Nib0 = Nic0'),
     #NOTE not '    return out' as the end marker: the CTS models return early
     #     for mesh_only and for koiter_num_modes == 0
     ("    print('# b_ijkl factors')", "    out['koiter'] = koiter"),
