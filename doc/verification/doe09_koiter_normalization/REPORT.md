@@ -121,6 +121,63 @@ element than with 10 (median, 9.6 to 38.7 ms), so 67 ms per element, about
 
 Peak memory 14.1 GB (case 0, NL, ny = 200, 70 min).
 
+## All convergence studies and their data
+
+Five studies of cases 0, 1 and 6, LIN and NL, ny = 80, 120, 160 and 200, 24
+runs each, in the order they were run. The RESULT line of every run, with all
+b_ijkl and a_ijk, is in [`results/`](results) as gzipped JSON lines, one
+`{"file": ..., "result": ...}` per run (`result` null for a run that wrote
+none), e.g.
+
+    import gzip, json
+    runs = [json.loads(l) for l in gzip.open('results/DOE09_conv_k5g.jsonl.gz', 'rt')]
+
+| study | Koiter set | crest | normalization reported | runs with RESULT | table | data |
+|---|---|---|---|---|---|---|
+| single-mode | 1 mode | none | nodal b_1111 | 24 | [`tables/DOE09_convergence_single_mode.txt`](tables/DOE09_convergence_single_mode.txt) | outputs not on the cluster, table only |
+| `_k5` nodal | first 5 distinct modes | none | nodal b_iiii | 23, one killed by the SuperLU fallback at 8 GB | [`tables/DOE09_convergence_k5_nodal.txt`](tables/DOE09_convergence_k5_nodal.txt) | [`results/DOE09_conv_k5_nodal.jsonl.gz`](results/DOE09_conv_k5_nodal.jsonl.gz) |
+| `_k5` crest | first 5 distinct modes | edge envelope | nodal, crest and RMS b_iiii | 10, cancelled for the energy normalization | below | [`results/DOE09_conv_k5_crest.jsonl.gz`](results/DOE09_conv_k5_crest.jsonl.gz) |
+| `_k5c` | 5 distinct modes and partners, 10 | 11 x 11 bicubic grid | energy b_min, b_min_t | 24 | [`tables/DOE09_convergence_k5c.txt`](tables/DOE09_convergence_k5c.txt), Section 7 | [`results/DOE09_conv_k5c.jsonl.gz`](results/DOE09_conv_k5c.jsonl.gz) |
+| `_k5g` | at least 5 distinct modes, groups completed, and partners, 9 to 12 | element, refined, largest over rotations | energy b_min, b_min_t | 24 | [`tables/DOE09_convergence_k5g.txt`](tables/DOE09_convergence_k5g.txt), Current results | [`results/DOE09_conv_k5g.jsonl.gz`](results/DOE09_conv_k5g.jsonl.gz) |
+
+Pcr agrees between all five, the Koiter section not changing the buckling
+analysis. The `_k5` crest study, b_iiii of the 5 modes with the nodal
+normalization, crest_w from the edge envelope (low by 0.5-0.8 %, see the
+Update), and b_iiii with the crest normalization, b_iiii/crest_w**2:
+
+| case, ny | b_iiii nodal | crest_w | b_iiii crest |
+|---|---|---|---|
+| 0 ny080 LIN | -0.0789/-0.0790/-0.1516/-0.1518/-0.0503 | 1.0486/1.0488/1.0463/1.0464/1.0292 | -0.0717/-0.0718/-0.1385/-0.1386/-0.0475 |
+| 0 ny080 NL | -0.2430/-0.2432/-0.1326/-0.1327/-0.1549 | 1.0116/1.0116/1.0109/1.0109/1.0123 | -0.2375/-0.2376/-0.1298/-0.1298/-0.1512 |
+| 0 ny120 LIN | 0.2733/0.2502/0.2945/0.2248/0.3160 | 1.0043/1.0038/1.0025/1.0003/1.0022 | 0.2709/0.2483/0.2930/0.2247/0.3147 |
+| 1 ny080 LIN | -303.2/-222.4/-121.4/-102.7/-101.9 | 4.2764/4.2333/4.2327/4.1341/4.1181 | -16.58/-12.41/-6.775/-6.009/-6.011 |
+| 1 ny080 NL | -0.2747/-0.2668/-0.2624/-0.2657/-0.3193 | 1.0242/1.0264/1.0257/1.0256/1.0227 | -0.2619/-0.2532/-0.2494/-0.2526/-0.3052 |
+| 1 ny120 LIN | 0.0406/0.0275/0.0275/0.0415/0.0269 | 1.0440/1.0440/1.0441/1.0435/1.0447 | 0.0372/0.0252/0.0252/0.0381/0.0246 |
+| 1 ny160 LIN | 0.0406/0.0272/0.0276/0.0415/0.0259 | 1.0440/1.0441/1.0439/1.0435/1.0448 | 0.0372/0.0250/0.0254/0.0381/0.0238 |
+| 6 ny080 LIN | -1.9523/-1.9740/-0.8076/-0.8316/-5.1110 | 1.0300/1.0357/1.0272/1.0424/1.0246 | -1.8402/-1.8402/-0.7654/-0.7654/-4.8684 |
+| 6 ny080 NL | -0.5362/-0.4485/-0.7212/-0.6129/-0.4558 | 1.0000/1.0000/1.0003/1.0082/1.0000 | -0.5362/-0.4485/-0.7208/-0.6029/-0.4558 |
+| 6 ny120 LIN | 0.0165/-0.0074/0.0223/0.0166/0.0014 | 1.0000/1.0074/1.0000/1.0000/1.0001 | 0.0165/-0.0072/0.0223/0.0166/0.0014 |
+
+In case 6, LIN, ny = 80, the crest normalization makes the two members of
+each pair agree (-1.9523 and -1.9740 become -1.8402 twice), as
+sec:normalisation of the implementation notes found for the rotation of a
+pair.
+
+### ny = 160 for the DOE
+
+With the present setup (`_k5g`), what ny = 160 gives, from the table and
+extrapolation of Current results:
+
+| quantity | at ny = 160 |
+|---|---|
+| Pcr | within 0.5 % of ny = 200 (0.19 %, 0.08 %, 0.51 %) |
+| b_min_t, 1 NL and 6 NL | within about 2.5 % of the extrapolated value |
+| b_min_t, 1 LIN | mesh independent |
+| b_min_t, 0 LIN | within 5 %, oscillating |
+| b_min_t, 0 NL | 11 % from ny = 200, the Koiter set changing between meshes (10 modes at 160, 12 at 200) |
+| b_min_t, 6 LIN | about 18 % from the extrapolated value, slow convergence of a small b (-0.05) |
+| cost | about 20,600 core-hours, 432 jobs |
+
 ## Update: element crest and cut degenerate clusters
 
 Two corrections since the first version of this report. Sections 5 to 7
