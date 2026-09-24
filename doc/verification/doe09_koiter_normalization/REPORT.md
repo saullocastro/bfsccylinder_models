@@ -1,362 +1,49 @@
 # DOE09: normalization and completeness of the multi-mode Koiter analysis
 
-Mesh convergence of the multi-mode post-buckling coefficients of
-`koiter_cylinder_CTS_sanders.fkoiter_cylinder_CTS_circum` (version 0.4.0) for
-the DOE09 designs A, B and C (cases 0, 1 and 6), and the setup chosen for the
-20,000 runs of the DOE. No DOE run has been submitted; the decision on the
-mesh is open, see [Decision](#9-decision), and it waits on the definition of
-the quantity measured, see the [Reassessment](#reassessment-why-b_min_t-of-the-nl-cases-does-not-converge).
+Method of the multi-mode post-buckling coefficients of
+`koiter_cylinder_CTS_sanders.fkoiter_cylinder_CTS_circum` for the DOE09
+designs A, B and C (cases 0, 1 and 6), and the setup chosen for the 20,000
+runs of the DOE. No DOE run has been submitted; the mesh is open, see
+[Decision](#9-decision).
 
-The library is unchanged. Every change is in the DOE09 driver, copied in
-[`scripts/`](scripts): `run_case.py`, `koiter_post.py` (new), `post.py`,
-`post_convergence.py`, `generate_qsubs.py` and
-`generate_qsubs_convergence.py`. The tables of the three convergence studies
-are in [`tables/`](tables), the diagnostic scripts in [`checks/`](checks).
+## Mesh convergence: restarted
 
-## Reassessment: why b_min_t of the NL cases does not converge
+All previous convergence studies (`_k5_nodal`, `_k5c`, `_k5g`, the
+reassessment studies a to m, and the SS4 comparison) were removed from the
+branch, with their results, tables, generators and post scripts, and the
+sections of this report that presented them: the Reassessment, Current
+results, All convergence studies, the Summary, and Sections 1, 2 and 7.
+They were run on the SS3 edges anchored at one node, most of them with v
+and w fixed at the edge nodes only; git history keeps them (up to commit
+`1fc65e2`).
 
-From the RESULT lines of the `_k5g` study
-([`results/DOE09_conv_k5g.jsonl.gz`](results/DOE09_conv_k5g.jsonl.gz)) and
-the meshes of `run_case.design_function`; no new model run. Scripts, run
-from this directory:
-[`checks/cluster_subsets.py`](checks/cluster_subsets.py),
-[`checks/multipliers_by_wavenumber.py`](checks/multipliers_by_wavenumber.py)
-and [`checks/mesh_axial_resolution.py`](checks/mesh_axial_resolution.py).
-The runs that settle the open points are in
-[`PROMPT_cluster_reassessment.md`](PROMPT_cluster_reassessment.md).
+The study is restarted from a low ny on the inertia relief edges of
+`bfsccylinder_models/edges.py` (commit `1fc65e2`), with the axial load on
+both edges and no node anchored:
 
-In short:
+- **SS3-IR**: v = w = 0 along both edges, the axial translation removed by
+  inertia relief (mass-weighted mean axial displacement zero). It gives the
+  SS3 results to round off, 1e-12 in Pcr and 5e-9 in b_1111 on the Waters
+  shell, the axial translation being a null vector of every operator.
+- **free-IR**: no edge condition, all six rigid body modes removed by
+  inertia relief. The lowest buckling modes are the n = 2 to 6 ovalizations
+  of the free edges, at a small fraction of the SS3-IR load (case 6 at
+  ny = 40: 1039 N against 6989 N).
 
-1. **b_min is set by the number of wave-number clusters in the Koiter set.**
-   A cluster is the 4 modes of one wave number n (symmetric and
-   antisymmetric, each with its rotated partner). In every NL run, b_min
-   over one cluster is b1, over two about 1.5 b1 and over three about
-   2.1 b1, and nothing shows the growth stopping at three: the truncation is
-   not converged.
-2. **Which clusters are in the set changes with the mesh**, the gaps between
-   the clusters (0.04 to 0.4 % in load) being smaller than what each
-   multiplier moves from mesh to mesh (0.1 to 0.3 % from ny = 160 to 200).
-3. **With the set taken out, the mesh error converges**: b_min of a single
-   cluster is within about 2.5 % (1 NL) and 3 % (6 NL) of its extrapolated
-   value at ny = 160, but 10 to 12 % for 0 NL.
-4. **The ny refinement is not a uniform refinement**: the axial mesh of case
-   1 is the same at ny = 120, 160 and 200 (nx = 127), and the edge elements
-   of case 0 stay at 5.2 mm from ny = 80 to 240. The Richardson estimates
-   below and in Current results assume one refinement ratio in both
-   directions.
-5. The expansion point lambda_b/lambda_c lands between 0.9951 and 0.9983
-   depending on the load stepping; its effect on these designs is not
-   measured. u0ddot, taken by a backward difference over a step that varies
-   from run to run, has no effect: it enters b_ijkl only through phi200,
-   multiplied by terms in a_ijk, which vanish on these cylinders (at most
-   1e-7 against b_ijkl of order 0.3, from ny = 120).
+[`scripts/generate_qsubs_convergence.py`](scripts/generate_qsubs_convergence.py):
+cases 0, 1 and 6, NL, eps1 = 0.0005, both edge conditions, ny = 24, 32, 40,
+48, 64, 80, 96, 120 and 160, and axial factors F = 0.5, 1 and 2 (largest
+axial element length dy/F: elements twice as long axially, square, half as
+long), 162 runs. Tables:
+[`checks/convergence_post.py`](checks/convergence_post.py), results in
+`results/DOE09_conv_ir.jsonl.gz` once the runs are done.
 
-### 1. b_min against the number of clusters
-
-The minimum direction e_min spreads over three adjacent wave numbers, with
-weights 0.43 on the middle one and 0.28-0.30 on each neighbour, in every NL
-run with three complete clusters. b_min_energy restricted to subsets of the
-clusters, which takes only the sub-block of the stored b_ijkl:
-
-| NL run | clusters | one (each) | two (each pair) | all three |
-|---|---|---|---|---|
-| 0, ny=120 | 29, 30, 31 | -10.74, -10.79, -10.53 | -16.11, -16.17, -15.96 | -23.15 |
-| 0, ny=200 | 30, 31, 32 | -12.40, -12.22, -11.98 | -18.50, -18.33, -18.19 | -26.23 |
-| 1, ny=160 | 23, 24, 25 | -0.304, -0.295, -0.281 | -0.450, -0.442, -0.433 | -0.632 |
-| 1, ny=200 | 23, 24, 25 | -0.308, -0.299, -0.286 | -0.456, -0.449, -0.440 | -0.641 |
-| 6, ny=160 | 29, 30, 31 | -4.26, -4.18, -4.09 | -6.35, -6.28, -6.22 | -8.99 |
-| 6, ny=200 | 29, 30, 31 | -4.36, -4.28, -4.18 | -6.50, -6.43, -6.36 | -9.20 |
-
-- A pair of clusters gives 1.5 b1 whether or not the two are adjacent, so
-  the growth is not only from the entries resonant in the wave numbers,
-  n_i + n_j = n_k + n_l, which exist from three clusters on; entries
-  coupling three or four different wave numbers carry 21 % of |b_ijkl|**2
-  in the three-cluster sets.
-- A further cluster adds directions to the Salerno minimum, which ignores
-  the differences of the multipliers, so it can only lower b_min, as long
-  as the entries among the clusters already there stay the same (they
-  change only through the orthogonality conditions of the second-order
-  fields, which take every Koiter mode). Five clusters
-  lie within 1 % of the critical load in case 0 NL (n = 29 to 33 at
-  ny = 200). b_min over "at least 5 distinct modes" is therefore a property
-  of where the set is cut, and so is b_min_t, through b_min_energy and
-  through the crest of the combined mode, which is larger for more clusters
-  combined (crest_e 12.67 with three, 11.26 with two and a half, case 0 NL).
-  How b_min_t behaves beyond three clusters is not known: b_min_energy and
-  crest_e**2 both grow with the number of clusters.
-- The LIN cases behave differently: the clusters do not enter equally,
-  b_min of the set being led by the cluster of most negative b (6 LIN
-  ny=160: -0.550 and -0.201, pair -0.803; ny=80: -117.3 and -39.6, pair
-  -118.7).
-
-### 2. The set changes with the mesh
-
-Buckling load in N of the lowest mode of each wave number, case 0 NL, *
-in the Koiter set ([`checks/multipliers_by_wavenumber.py`](checks/multipliers_by_wavenumber.py)):
-
-| n | ny=120 | ny=160 | ny=200 |
-|---|---|---|---|
-| 28 | 3912.0 | 3906.8 | |
-| 29 | 3897.6* | 3883.3* | 3880.3 |
-| 30 | 3896.9* | 3872.2* | 3866.5* |
-| 31 | 3910.0* | 3873.6* | 3864.8* |
-| 32 | 3936.6 | 3887.3 | 3875.0* |
-| 33 | | 3913.0 | 3896.8 |
-
-n = 29 and n = 32 change places between ny = 160 and 200 (3883.3 against
-3887.3, then 3880.3 against 3875.0), and at ny = 160 the n = 29 cluster is
-cut in half (the 2.7e-5 split of Current results). The critical wave number
-moves as well, 26, 30, 30, 31 from ny = 80 to 200. Raising
-`koiter_cluster_rtol` (option 5 of the Decision) would stop the cut, but not
-the change of the set or of its size. In cases 1 NL and 6 NL the set is the
-same three wave numbers from ny = 160 on (23-25 and 29-31), with the next
-cluster 0.6 to 0.9 % above the critical load, which is why those two cases
-look converged in Current results.
-
-### 3. The mesh error, one cluster at a time
-
-b_min_energy of a single complete cluster, unlike b_iiii of a single mode,
-does not depend on the slice of a degenerate eigenspace returned by the eigen
-solver. Followed at fixed n, Richardson from ny = 120, 160 and 200
-([`checks/cluster_subsets.py`](checks/cluster_subsets.py)):
-
-| NL cluster | ny=120 | ny=160 | ny=200 | order | extrapolated | error at 160 | error at 200 |
-|---|---|---|---|---|---|---|---|
-| 0, n=30 | -10.79 | -11.87 | -12.40 | 1.7 | -13.53 | 12.3 % | 8.3 % |
-| 0, n=31 | -10.53 | -11.70 | -12.22 | 2.1 | -13.07 | 10.5 % | 6.5 % |
-| 1, n=23 | -0.2872 | -0.3039 | -0.3082 | 4.2 | -0.3110 | 2.3 % | 0.9 % |
-| 1, n=24 | -0.2779 | -0.2946 | -0.2989 | 4.2 | -0.3017 | 2.4 % | 0.9 % |
-| 6, n=29 | -3.516 | -4.256 | -4.360 | 6.5 | -4.392 | 3.1 % | 0.7 % |
-| 6, n=30 | -3.499 | -4.180 | -4.280 | 6.3 | -4.312 | 3.1 % | 0.7 % |
-
-These change monotonically, unlike b_min_t. For case 1 they measure the
-circumferential refinement only (Section 4). Case 0 converges at order 2,
-against 4 to 6 for cases 1 and 6. At ny = 160 a wave n = 30 has 5.3
-elements around the circumference, and the harmonic 2n of the second-order
-fields 2.7.
-
-### 4. The meshes
-
-[`checks/mesh_axial_resolution.py`](checks/mesh_axial_resolution.py), axial
-element lengths from `choose_nxt` of `run_case.py`:
-
-| case | ny | nx | dy (mm) | dx at the edge (mm) | dx max (mm) | sqrt(R h) (mm) |
-|---|---|---|---|---|---|---|
-| 0 | 80 / 120 / 160 / 200 / 240 / 280 | 91 / 121 / 161 / 191 / 221 / 321 | 31.4 to 9.0 | 5.2 at all six | 19.8 / 12.4 / 8.3 / 6.6 / 5.5 / 5.2 | 10.4 |
-| 1 | 80 / 120 / 160 / 200 / 240 / 280 | 67 / 127 / 127 / 127 / 169 / 169 | 31.4 to 9.0 | 23.4 / 11.7 / 11.7 / 11.7 / 7.8 / 7.8 | the edge value | 17.3 |
-| 6 | 80 / 120 / 160 / 200 / 240 / 280 | 41 / 65 / 81 / 97 / 121 / 137 | 31.4 to 9.0 | 30.0 / 18.8 / 15.0 / 12.5 / 10.0 / 8.8 | the edge value | 12.4 |
-
-- Case 1: `choose_nxt` only keeps dx at or below dy, and dx = 11.7 mm
-  already is at ny = 120, so the axial mesh does not change until ny = 240.
-  1 LIN is constant to 10 digits from ny = 120 for that reason, not because
-  it is mesh independent. The axial error of case 1 is not measured.
-- Case 0: the edge elements, where the end-localized modes and the
-  boundary layer of the nonlinear pre-buckling state are, stay at 5.2 mm,
-  while the interior goes from 19.8 to 5.5 mm.
-- Case 6: dx follows dy, the only one of the three refined in both
-  directions at once.
-
-### 5. Other candidates
-
-- **Expansion point.** On the Arbocz shell, lambda_b/lambda_c from 0.9968 to
-  0.9991 moved b_1111 by 0.9 % (`doc/nlprebuck_implementation.tex`). Here
-  lambda_b/lambda_c is 0.9951 to 0.9983 (6 NL: 0.99676, 0.99508, 0.99571 at
-  ny = 120, 160, 200), and the nonlinear pre-buckling state takes 28 % off
-  the linear buckling load of case 1, so the sensitivity may be larger.
-  `NLprebuck_eps1` is a parameter of the model that `run_case.py` does not
-  pass.
-- **u0ddot**: no effect, see point 5 above.
-- **Eigenvector accuracy**: eigsh with tol = 1e-6 and a gap of 1.4e-3 or
-  more to the first mode left out, an error of the order of tol/gap, 1e-3
-  at most, on the modes; small against the rest.
-
-### Consequences for the DOE
-
-- The mesh cannot be chosen before the quantity is defined in a way that is
-  the same at every mesh. b_min over "at least 5 distinct modes" is not. Two
-  candidates:
-  - b_min of the critical cluster alone, which converges (Section 3), to
-    within about 3 % at ny = 160 for cases 1 and 6 (case 1 axially
-    unchecked) and 12 % for case 0;
-  - b_min_t over a window of wave numbers about the critical one, once
-    b_min_t is shown to settle as the window widens.
-- Runs to settle it, all at ny = 240 or below: the number of clusters (5, 7
-  and 9 distinct modes at ny = 120 and 160), axial refinement at fixed ny,
-  and `NLprebuck_eps1`, see
-  [`PROMPT_cluster_reassessment.md`](PROMPT_cluster_reassessment.md).
-
-## Current results: complete clusters (study `_k5g`)
-
-Latest setup, option 4 (b) of the [Decision](#9-decision):
-
-- **library** (this branch): `koiter_num_modes` of the four models may be a
-  callable of the multipliers and eigenvectors, called once after the last
-  eigenvalue analysis and returning the number of Koiter modes, recorded in
-  `out['koiter_num_modes']`. New test
-  [`tests/test_koiter_num_modes_callable.py`](../../../tests/test_koiter_num_modes_callable.py):
-  a callable gives the same b_ijkl as the number it returns, CTS and constant
-  stiffness models, LIN and NL, and 0 or too many modes are handled. The whole
-  test suite passes on the branch, 37 tests, PARDISO blocked;
-- **driver**: at least 5 distinct modes, then every further distinct mode
-  whose multiplier equals that of the last taken to 1e-5 (`koiter_cluster_rtol`,
-  the tolerance of `canonical_modes`), each followed by its rotated partner,
-  K_C-orthonormal, energy normalization, minimum direction of Salerno, and
-  `b_min_t` with the element crest over the rotations within one element
-  (see the Update below). num_eigvals = 16. `koiter_gap` in the RESULT line
-  is the relative gap to the first distinct mode left out. The jobs run the
-  library of this branch (`PYTHONPATH`), and `run_case.py` stops if the
-  library does not take a callable.
-
-**Invariance** ([`checks/eigenspace_slice.py`](checks/eigenspace_slice.py),
-case 1, NL, ny = 80, the 12 Koiter modes n = 22, 23 and 21, four of each):
-
-| | original slice | other slice |
-|---|---|---|
-| b_min_energy | -0.600351 | -0.600336 |
-| b_min_t | -0.21678 | -0.21683 |
-| crest_e (smallest over the rotations) | 1.66415 (1.61627) | 1.66396 (1.61481) |
-
-against -0.4678 and -0.5975 for the same check with the n = 21 group cut.
-
-**Convergence**, [`tables/DOE09_convergence_k5g.txt`](tables/DOE09_convergence_k5g.txt),
-24 runs, no failure, no fallback to SuperLU, no incomplete pre-buckling
-iteration. m is the number of Koiter modes, gap the relative gap in
-multiplier to the first distinct mode left out.
-
-| case | ny | b_min_t | b_min_energy | crest_e | m | gap |
-|---|---|---|---|---|---|---|
-| 0 LIN | 80 | -0.07182 | -8.054 | 10.590 | 10 | 3.0e-4 |
-| | 120 | 0.12649 | 0.267 | 1.452 | 10 | 7.7e-4 |
-| | 160 | 0.12337 | 0.289 | 1.530 | 10 | 8.3e-4 |
-| | 200 | 0.12936 | 0.316 | 1.563 | 10 | 1.3e-3 |
-| 0 NL | 80 | -0.12523 | -19.297 | 12.413 | 10 | 1.9e-4 |
-| | 120 | -0.14419 | -23.145 | 12.670 | 12 | 5.1e-4 |
-| | 160 | -0.15668 | -19.859 | 11.258 | **10** | **2.7e-5** |
-| | 200 | -0.17366 | -26.232 | 12.290 | 12 | 1.4e-3 |
-| 1 LIN | 80 | -3.60439 | -4.698 | 1.142 | 9 | 2.0e-3 |
-| | 120 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
-| | 160 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
-| | 200 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
-| 1 NL | 80 | -0.21629 | -0.600 | 1.666 | 12 | 1.5e-4 |
-| | 120 | -0.17662 | -0.596 | 1.836 | 12 | 4.4e-3 |
-| | 160 | -0.18859 | -0.631 | 1.830 | 12 | 5.7e-3 |
-| | 200 | -0.19150 | -0.641 | 1.829 | 12 | 5.2e-3 |
-| 6 LIN | 80 | -2.62314 | -120.150 | 6.768 | 12 | 7.1e-3 |
-| | 120 | -0.03712 | -0.592 | 3.994 | 10 | 6.0e-5 |
-| | 160 | -0.04851 | -0.803 | 4.067 | 10 | 3.0e-5 |
-| | 200 | -0.05317 | -0.860 | 4.023 | 10 | 4.1e-5 |
-| 6 NL | 80 | -0.42118 | -29.054 | 8.306 | 10 | 2.1e-4 |
-| | 120 | -0.18102 | -7.570 | 6.467 | 12 | 1.7e-3 |
-| | 160 | -0.22709 | -8.990 | 6.292 | 12 | 5.0e-3 |
-| | 200 | -0.23225 | -9.203 | 6.295 | 12 | 3.9e-3 |
-
-b_min_t from ny = 120, 160 and 200:
-
-| case | 160 to 200 | Richardson | error at 160 | error at 200 |
-|---|---|---|---|---|
-| 0 LIN | 4.9 % | not monotone: 0.1265, 0.1234, 0.1294 | | |
-| 0 NL | 10.8 % | not monotone (step ratio 1.36) | | |
-| 1 LIN | 0 | constant, 0.03722 | 0 | 0 |
-| 1 NL | 1.5 % | order 4.4, -0.1932 | 2.4 % | 0.9 % |
-| 6 LIN | 9.6 % | order 2.5, -0.0595 | 18.5 % | 10.6 % |
-| 6 NL | 2.3 % | order 7.3, -0.2335 | 2.7 % | 0.5 % |
-
-Observations:
-
-- ny = 80 is unusable, as before.
-- **Cases 1 NL and 6 NL are converged at ny = 160 to about 2.5 %**, and to
-  1 % at ny = 200; with the clusters cut (Section 7) they were not
-  reproducible. (Reassessment: their set is the same three wave numbers
-  from ny = 160 on, and the axial mesh of case 1 is not refined from
-  ny = 120 to 200, so this is the circumferential convergence of a
-  three-cluster b_min.) Case 1 LIN, governed by an axisymmetric mode, is mesh
-  independent.
-- **Case 0 NL is not, and the reason is the Koiter set, not the mesh**: at
-  ny = 160 the 5th distinct mode and the next one are 2.7e-5 apart, above the
-  1e-5 of `koiter_cluster_rtol`, so the set stops at 10 modes, while at
-  ny = 120 and 200 their split falls below 1e-5 and the set has 12. The
-  symmetric/antisymmetric splitting of the end-localized modes is of that
-  order and varies with the mesh, so a set defined by an equality of
-  multipliers changes from mesh to mesh near the tolerance. A near-degenerate
-  pair split by 2.7e-5 is also only resolved by the eigen solver to about
-  tol/gap = 1e-6/2.7e-5.
-- Case 6 LIN converges slowly (order 2.5), with gaps of 3-6e-5 at every mesh,
-  a dense cluster; b_min_t is small, -0.05.
-- Case 0 LIN oscillates within 5 % about 0.126, a positive b.
-- The rotation of the pairs reproduces the shift by one element to 2e-4 at
-  worst (0 LIN, ny = 80) and to 1e-5 or better from ny = 120.
-
-**Cost.** 12 Koiter modes in 10 of the 24 runs; for those, 20 ms more per
-element than with 10 (median, 9.6 to 38.7 ms), so 67 ms per element, about
-55 ms on average, 60 ms in `generate_qsubs.py`:
-
-| ny | core-hours (60 ms) | core-hours (67 ms) | jobs |
-|---|---|---|---|
-| 160 | 20,600 | 21,300 | 432 |
-| 200 | 31,000 | 32,200 | 1,133 |
-
-Peak memory 14.1 GB (case 0, NL, ny = 200, 70 min).
-
-## All convergence studies and their data
-
-Five studies of cases 0, 1 and 6, LIN and NL, ny = 80, 120, 160 and 200, 24
-runs each, in the order they were run. The RESULT line of every run, with all
-b_ijkl and a_ijk, is in [`results/`](results) as gzipped JSON lines, one
-`{"file": ..., "result": ...}` per run (`result` null for a run that wrote
-none), e.g.
-
-    import gzip, json
-    runs = [json.loads(l) for l in gzip.open('results/DOE09_conv_k5g.jsonl.gz', 'rt')]
-
-| study | Koiter set | crest | normalization reported | runs with RESULT | table | data |
-|---|---|---|---|---|---|---|
-| single-mode | 1 mode | none | nodal b_1111 | 24 | [`tables/DOE09_convergence_single_mode.txt`](tables/DOE09_convergence_single_mode.txt) | outputs not on the cluster, table only |
-| `_k5` nodal | first 5 distinct modes | none | nodal b_iiii | 23, one killed by the SuperLU fallback at 8 GB | [`tables/DOE09_convergence_k5_nodal.txt`](tables/DOE09_convergence_k5_nodal.txt) | [`results/DOE09_conv_k5_nodal.jsonl.gz`](results/DOE09_conv_k5_nodal.jsonl.gz) |
-| `_k5` crest | first 5 distinct modes | edge envelope | nodal, crest and RMS b_iiii | 10, cancelled for the energy normalization | below | [`results/DOE09_conv_k5_crest.jsonl.gz`](results/DOE09_conv_k5_crest.jsonl.gz) |
-| `_k5c` | 5 distinct modes and partners, 10 | 11 x 11 bicubic grid | energy b_min, b_min_t | 24 | [`tables/DOE09_convergence_k5c.txt`](tables/DOE09_convergence_k5c.txt), Section 7 | [`results/DOE09_conv_k5c.jsonl.gz`](results/DOE09_conv_k5c.jsonl.gz) |
-| `_k5g` | at least 5 distinct modes, groups completed, and partners, 9 to 12 | element, refined, largest over rotations | energy b_min, b_min_t | 24 | [`tables/DOE09_convergence_k5g.txt`](tables/DOE09_convergence_k5g.txt), Current results | [`results/DOE09_conv_k5g.jsonl.gz`](results/DOE09_conv_k5g.jsonl.gz) |
-
-Pcr agrees between all five, the Koiter section not changing the buckling
-analysis. The `_k5` crest study, b_iiii of the 5 modes with the nodal
-normalization, crest_w from the edge envelope (low by 0.5-0.8 %, see the
-Update), and b_iiii with the crest normalization, b_iiii/crest_w**2:
-
-| case, ny | b_iiii nodal | crest_w | b_iiii crest |
-|---|---|---|---|
-| 0 ny080 LIN | -0.0789/-0.0790/-0.1516/-0.1518/-0.0503 | 1.0486/1.0488/1.0463/1.0464/1.0292 | -0.0717/-0.0718/-0.1385/-0.1386/-0.0475 |
-| 0 ny080 NL | -0.2430/-0.2432/-0.1326/-0.1327/-0.1549 | 1.0116/1.0116/1.0109/1.0109/1.0123 | -0.2375/-0.2376/-0.1298/-0.1298/-0.1512 |
-| 0 ny120 LIN | 0.2733/0.2502/0.2945/0.2248/0.3160 | 1.0043/1.0038/1.0025/1.0003/1.0022 | 0.2709/0.2483/0.2930/0.2247/0.3147 |
-| 1 ny080 LIN | -303.2/-222.4/-121.4/-102.7/-101.9 | 4.2764/4.2333/4.2327/4.1341/4.1181 | -16.58/-12.41/-6.775/-6.009/-6.011 |
-| 1 ny080 NL | -0.2747/-0.2668/-0.2624/-0.2657/-0.3193 | 1.0242/1.0264/1.0257/1.0256/1.0227 | -0.2619/-0.2532/-0.2494/-0.2526/-0.3052 |
-| 1 ny120 LIN | 0.0406/0.0275/0.0275/0.0415/0.0269 | 1.0440/1.0440/1.0441/1.0435/1.0447 | 0.0372/0.0252/0.0252/0.0381/0.0246 |
-| 1 ny160 LIN | 0.0406/0.0272/0.0276/0.0415/0.0259 | 1.0440/1.0441/1.0439/1.0435/1.0448 | 0.0372/0.0250/0.0254/0.0381/0.0238 |
-| 6 ny080 LIN | -1.9523/-1.9740/-0.8076/-0.8316/-5.1110 | 1.0300/1.0357/1.0272/1.0424/1.0246 | -1.8402/-1.8402/-0.7654/-0.7654/-4.8684 |
-| 6 ny080 NL | -0.5362/-0.4485/-0.7212/-0.6129/-0.4558 | 1.0000/1.0000/1.0003/1.0082/1.0000 | -0.5362/-0.4485/-0.7208/-0.6029/-0.4558 |
-| 6 ny120 LIN | 0.0165/-0.0074/0.0223/0.0166/0.0014 | 1.0000/1.0074/1.0000/1.0000/1.0001 | 0.0165/-0.0072/0.0223/0.0166/0.0014 |
-
-In case 6, LIN, ny = 80, the crest normalization makes the two members of
-each pair agree (-1.9523 and -1.9740 become -1.8402 twice), as
-sec:normalisation of the implementation notes found for the rotation of a
-pair.
-
-### ny = 160 for the DOE
-
-With the present setup (`_k5g`), what ny = 160 gives, from the table and
-extrapolation of Current results:
-
-| quantity | at ny = 160 |
-|---|---|
-| Pcr | within 0.5 % of ny = 200 (0.19 %, 0.08 %, 0.51 %) |
-| b_min_t, 1 NL and 6 NL | within about 2.5 % of the extrapolated value |
-| b_min_t, 1 LIN | mesh independent |
-| b_min_t, 0 LIN | within 5 %, oscillating |
-| b_min_t, 0 NL | 11 % from ny = 200, the Koiter set changing between meshes (10 modes at 160, 12 at 200) |
-| b_min_t, 6 LIN | about 18 % from the extrapolated value, slow convergence of a small b (-0.05) |
-| cost | about 20,600 core-hours, 432 jobs |
+The sections below describe the method (normalization, mode set, crest);
+the ny quoted in them locate their evidence, not a mesh recommendation.
 
 ## Update: element crest and cut degenerate clusters
 
-Two corrections since the first version of this report. Sections 5 to 7
+Two corrections since the first version of this report. Sections 5 and 6
 below are kept as first written, with notes where these corrections apply.
 
 **1. The crest is now computed with the kinematics of the element.**
@@ -409,7 +96,7 @@ eigenspace of case 1, NL, ny = 80, is four-dimensional too (multipliers
 n = 22 (2), n = 23 (2) and **one** of the two n = 21 modes, with its partner:
 half of that eigenspace, the other half left out, chosen by round off. The
 agreement to 7e-6 of Section 6 was the two runs happening to return the same
-half. Over the 24 runs of Section 7, the 5th distinct mode and the next one
+half. Over the 24 runs of the removed Section 7 (git history), the 5th distinct mode and the next one
 share their multiplier to better than 1e-5 in:
 
 | run | gap to the next distinct mode |
@@ -421,87 +108,13 @@ share their multiplier to better than 1e-5 in:
 | 6 NL ny=120, 160, 200 | 2.5e-10, 1.9e-12, 1.3e-10 |
 
 and to 3-4e-5 in 0 NL ny=160, 6 LIN ny=160 and 200. **The b_min and b_min_t
-of Section 7 for these runs depend on round off.** The fix is a Koiter set
+of the removed Section 7 for these runs depend on round off.** The fix is a Koiter set
 made of complete clusters: at least 5 distinct modes, extended to the end of
 the cluster of the 5th, with their partners, 12 modes when the clusters are
 four-fold as in the NL cases. That makes the number of Koiter modes vary from
 run to run, and `fkoiter_cylinder_CTS_circum` takes koiter_num_modes before
 its eigenvalue analysis; see [Decision](#9-decision), option 4.
 
-The convergence study was rerun with these corrections and the groups
-completed, see [Current results](#current-results-complete-clusters-study-_k5g);
-the outputs of Section 7 are kept as `k5c_grid11` in the DOE09 directory.
-
-## Summary
-
-**See [Current results](#current-results-complete-clusters-study-_k5g)
-for the latest setup and convergence study; the summary below is of the
-first version.**
-
-1. Pcr is converged at ny = 160: within 0.5 % of ny = 200.
-2. The single-mode b and the multi-mode b_iiii of the models do not converge,
-   and are not reproducible, for two independent reasons:
-   - **normalization**: the modes are scaled by their largest *nodal*
-     translation, which misses the crest of a mode between nodes (3-5 % at
-     ny = 80, b moving by 6-10 %);
-   - **mode set**: the critical modes of these cylinders come as symmetric and
-     antisymmetric pairs of end-localized buckles. When the two share their
-     multiplier to round off (case 1 with NLprebuck: 1.7e-14), each wave number
-     has a four-dimensional eigenspace, of which the eigen solver returns an
-     arbitrary two-dimensional slice. The 5-mode b_ijkl then depend on round
-     off (13 % on b_iiii, 5-30 % on the minimum of b).
-3. Following the multi-mode analysis of Rahman (2009), the expansion is now
-   made on the 5 distinct modes **and their rotated partners**
-   (koiter_num_modes = 10), made K_C-orthonormal, with the **energy
-   normalization** lambda_i |d_i| = 1, and summarized by the most imperfection
-   sensitive direction of Salerno, b_min. b_min is invariant under the choice
-   of the eigenspace slice to 7e-6. `b_min_t` is b_min for the combined mode
-   scaled to a crest of w equal to the thickness.
-4. With this setup, b_min_t varies smoothly from ny = 120 on; ny = 160 is
-   within 2-7 % of ny = 200 for NL and within 10 % for LIN, but it is not yet
-   converged for all cases.
-5. Cost: the 10-mode Koiter section takes 47 ms per element; the DOE is
-   19,100 core-hours at ny = 160 and 28,900 at ny = 200.
-
-## 1. Pcr and the single-mode b
-
-Single-mode study, [`tables/DOE09_convergence_single_mode.txt`](tables/DOE09_convergence_single_mode.txt),
-NLprebuck = True:
-
-| case | Pcr ny=160 | Pcr ny=200 | diff | b ny=80 | b ny=120 | b ny=160 | b ny=200 |
-|---|---|---|---|---|---|---|---|
-| 0 | 3872.2 | 3864.8 | 0.19 % | -0.243 | -0.334 | -0.235 | -0.220 |
-| 1 | 8961.5 | 8954.2 | 0.08 % | -0.264 | -0.230 | -0.263 | -0.281 |
-| 6 | 4558.0 | 4534.7 | 0.51 % | -0.536 | -0.244 | -0.275 | -0.330 |
-
-b oscillates with the mesh. mu1_ratio, the multiplier of the second mode over
-the critical one, is 1.00001 to 1.002, below the 0.005 gap for which the
-single-mode b is determinate (sec:convergence of the manuscript).
-
-## 2. The 5-mode study with the nodal normalization
-
-[`tables/DOE09_convergence_k5_nodal.txt`](tables/DOE09_convergence_k5_nodal.txt)
-(koiter_num_modes = 5, 23 of 24 runs; case 6, NL, ny = 120 segfaulted when the
-SuperLU fallback ran out of its 8 GB, and its rerun was superseded).
-
-The b_iiii of individual modes are not comparable across meshes, the modes
-changing order (case 0 NL: critical n = 30 at ny = 160, 31 at ny = 200). The
-minimum over unit xi of the quartic form b(xi) = b_ijkl xi_i xi_j xi_k xi_l
-of the nodal-scaled modes, over the critical pair and over all 5 modes:
-
-| case | ny=80 | ny=120 | ny=160 | ny=200 |
-|---|---|---|---|---|
-| 0 NL, critical pair | -0.487 | -0.670 | -0.473 | -0.248 |
-| 0 NL, 5 modes | -1.083 | -0.916 | -0.604 | -0.612 |
-| 1 NL, critical pair | -0.348 | -0.303 | -0.284 | -0.321 |
-| 1 NL, 5 modes | -0.656 | -0.451 | -0.435 | -0.640 |
-| 6 NL, critical pair | -0.855 | | -0.301 | -0.331 |
-| 6 NL, 5 modes | -1.474 | | -0.592 | -0.584 |
-| 0 LIN, 5 modes | -0.344 | 0.219 | 0.224 | 0.238 |
-| 1 LIN, 5 modes | -1528 | 0.011 | 0.021 | 0.021 |
-| 6 LIN, 5 modes | -5.594 | -0.103 | -0.119 | -0.147 |
-
-Changes of 10-50 % from ny = 160 to 200, not monotone.
 
 ## 3. What the modes are
 
@@ -652,62 +265,6 @@ rotated field falls differently between the nodes.
 mode cuts the four-fold n = 21 eigenspace, and a later repetition of the same
 check gave -0.4678 against -0.5975.
 
-## 7. Convergence with the closed basis and the energy normalization
-
-**Note (Update):** these results use the old crests (points 1 and 2 of the
-Update), and in 10 of the 24 runs the Koiter set cuts a degenerate cluster
-(point 3), so b_min and b_min_t of those runs depend on round off.
-
-[`tables/DOE09_convergence_k5c.txt`](tables/DOE09_convergence_k5c.txt), all
-24 runs finished, no PARDISO fallback to SuperLU, no incomplete nonlinear
-pre-buckling iteration. Case 6, NL, ny = 120, which segfaulted in the study
-of Section 2, finished at 8 GB with a 2.8 GB peak.
-
-b_min_t:
-
-| case | ny=80 | ny=120 | ny=160 | ny=200 | 160 to 200 |
-|---|---|---|---|---|---|
-| 0 LIN | -0.0722 | 0.1267 | 0.1240 | 0.1294 | 4.3 % |
-| 0 NL | -0.1281 | -0.1464 | -0.1576 | -0.1658 | 5.2 % |
-| 1 LIN | -0.8761 | 0.03756 | 0.03756 | 0.03756 | 0 % |
-| 1 NL | -0.2301 | -0.1733 | -0.1792 | -0.1910 | 6.6 % |
-| 6 LIN | -1.7409 | -0.0373 | -0.0486 | -0.0534 | 9.8 % |
-| 6 NL | -0.4224 | -0.1919 | -0.2189 | -0.2239 | 2.3 % |
-
-b_min_energy and crest_e:
-
-| case | b_min_energy ny=120 / 160 / 200 | crest_e ny=120 / 160 / 200 |
-|---|---|---|
-| 0 LIN | 0.267 / 0.289 / 0.316 | 1.451 / 1.526 / 1.562 |
-| 0 NL | -22.53 / -19.86 / -21.21 | 12.41 / 11.23 / 11.31 |
-| 1 LIN | 0.0083 / 0.0083 / 0.0083 | 0.470 / 0.470 / 0.470 |
-| 1 NL | -0.545 / -0.550 / -0.634 | 1.773 / 1.753 / 1.821 |
-| 6 LIN | -0.592 / -0.803 / -0.860 | 3.985 / 4.064 / 4.016 |
-| 6 NL | -7.539 / -7.760 / -8.215 | 6.268 / 5.954 / 6.057 |
-
-Richardson extrapolation of b_min_t from ny = 120, 160 and 200:
-
-| case | order | extrapolated | error at 160 | error at 200 |
-|---|---|---|---|---|
-| 0 LIN | not monotone | | | |
-| 0 NL | 0.20 | -0.347 | 55 % | 52 % |
-| 1 LIN | constant | 0.0376 | 0 | 0 |
-| 1 NL | not monotone (step ratio 2.0) | | | |
-| 6 LIN | 2.36 | -0.0602 | 19 % | 11 % |
-| 6 NL | 5.44 | -0.2260 | 3.1 % | 0.9 % |
-
-Observations:
-
-- ny = 80 is unusable: the signs flip against the finer meshes.
-- From ny = 120 on the values vary smoothly, against the 10-50 % oscillation of
-  Section 2. Case 6 NL is in the asymptotic range; cases 0 NL and 1 NL still
-  drift by 5-7 % per step, and the extrapolation for 0 NL (order 0.2) is not
-  reliable, so their error at ny = 160 may exceed the 160 to 200 difference.
-- Case 1 LIN is governed by an axisymmetric mode, e_min = mode 0 alone, and
-  is mesh independent from ny = 120.
-- The minimum directions mix all 10 modes; e_min of every run is in the
-  RESULT line of its output.
-
 ## 8. Cost
 
 The 10-mode Koiter section takes 30 ms per element more than the 5-mode one,
@@ -725,59 +282,12 @@ ny = 200, 57 min.
 
 ## 9. Decision
 
-Open, one of:
-
-1. **ny = 240 and 280 for cases 0, 1 and 6, LIN and NL, first** (12 runs, a
-   few hours each), to see whether b_min_t settles before committing the DOE.
-   Recommended in the first version; superseded by option 4, which has to
-   come first.
-2. **DOE at ny = 160**, 19,100 core-hours, with a mesh uncertainty of about
-   5-10 % on b_min_t from this study; Pcr converged.
-3. **DOE at ny = 200**, 28,900 core-hours, not shown to be converged either.
-4. **Complete clusters first** (see the Update at the top), then rerun the
-   convergence study. **Done, (b)**, see Current results at the top:
-   - (a) in the DOE09 driver: run the model with 10 Koiter modes, and when the
-     final eigenvalue analysis shows that the 5th distinct mode cuts a cluster,
-     run it again with the number of modes that completes it. No library
-     change, but the runs concerned cost twice (10 of the 24 of the study,
-     mostly NLprebuck);
-   - (b) in the library, on this branch: let koiter_num_modes be chosen after
-     the eigenvalue analysis, e.g. a minimum number of distinct modes
-     completed to whole clusters. No rerun, but the DOE then runs on the
-     branch until it is released;
-   - either way, 12 modes instead of 10 for most NL cases: 78 bordered solves
-     instead of 55, and about 1.5 times the Koiter cost of 10 modes.
-
-Open after the `_k5g` study:
-
-5. **Group near-degenerate modes as well**: raise `koiter_cluster_rtol` from
-   1e-5 to about 1e-4, above the symmetric/antisymmetric splittings seen
-   (2.7e-5 to 6e-5 in 0 NL and 6 LIN), so that the set does not change from
-   mesh to mesh; check first, on the 24 runs, how many modes that takes, the
-   dense cluster of 6 LIN possibly chaining beyond num_eigvals. Recommended
-   before the DOE, as it is what keeps case 0 NL from converging.
-6. **DOE at ny = 160 with the present set**, 20,600 core-hours: b_min_t
-   within about 2.5 % for 1 NL and 6 NL, 5 % for 0 LIN, 10-20 % for 0 NL and
-   6 LIN, and Pcr within 0.5 %.
-7. **DOE at ny = 200**, 31,000 core-hours: within 1 % for 1 NL and 6 NL,
-   but 0 NL and 6 LIN still not shown to be converged.
-
-After the [Reassessment](#reassessment-why-b_min_t-of-the-nl-cases-does-not-converge):
-
-8. Options 5 to 7 are on hold. b_min over at least 5 distinct modes depends
-   on how many wave-number clusters the set holds, and that changes with the
-   mesh, so no mesh makes it converge. First, on the cluster
-   ([`PROMPT_cluster_reassessment.md`](PROMPT_cluster_reassessment.md)):
-   - (a) b_min_energy and b_min_t against the number of clusters, 5, 7 and 9
-     distinct modes, cases 0, 1 and 6 NL at ny = 120 and 160;
-   - (b) the axial refinement at fixed ny = 160, dx capped at dy/1.5 and
-     dy/2;
-   - (c) `NLprebuck_eps1` = 0.005, 0.002, 0.001 and 0.0005 for cases 1 and 6
-     NL at ny = 120;
-   - (d) ny = 240 with the present setup, for the per-cluster convergence.
-   Then choose the quantity of the DOE, the b_min of the critical cluster or
-   b_min_t over a window of wave numbers about the critical one if (a) shows
-   it settling, and the mesh for that quantity.
+Open, until the convergence study above is done: the mesh of the DOE (ny
+and the axial factor F, possibly elongated elements), the quantity of the
+DOE (b_min_t of the critical cluster or of a window of wave numbers about
+it), and the edge condition, SS3-IR or free-IR. The options of the previous
+version of this section, which rested on the removed studies, are in git
+history.
 
 ## 10. Issues in the library
 
@@ -808,30 +318,26 @@ Reported, not changed; both are worked around in `run_case.py`:
     kinematics, replacing `mode_amplitudes` and `field_crest`),
     `pair_rotation` and `orbit_crest` (largest crest over the rotations within
     one element), crest_e_min, rotation_error, and crest_method =
-    'element_orbit', which `generate_qsubs.py`, `generate_qsubs_convergence.py`
-    and `post.py` require of an output.
+    'element_orbit', which `generate_qsubs.py` and `post.py` require of an
+    output; since `1fc65e2`, `--edges SS3|SS4|SS3-IR|free-IR`.
 - `koiter_post.py`: `rescaled`, `energy_scales`, `symmetrized`,
   `min_direction`.
 - `post.py`: `DOE09_koiter.npz` with the nodal b_ijkl and a_ijk of the 10
   modes, the scales of the other normalizations, b_min_energy, b_min_t,
   crest_e and e_min; b_min_t and b_min_energy in `DOE09_output.txt`.
-- `post_convergence.py`: columns b_min_t, b_min_energy, crest_e, b_iiii_crest,
-  b_iiii_rms, crest_w; default study `_k5c`.
 - `generate_qsubs.py`: requires the closed 10-mode setup, reruns outputs of
   earlier setups, `koiter_time_per_element = 0.047`, `python -u` so that a
   crashed run keeps its log.
-- `generate_qsubs_convergence.py`: suffix `_k5c`, walltime 12 h, `python -u`,
-  reruns outputs without b_min_energy.
+- `generate_qsubs_convergence.py`: the restarted convergence study, see
+  the top of this report.
 
 The scripts in [`checks/`](checks) were run from the DOE09 directory, next to
 `DOE09.txt`, with the `run_case.py` of their stage: `crest_methods.py` and
 `element_crest_reference.py` with the one of the Update, `mode_pairs.py`,
 `pair_mixing.py` and `same_process_resolve.py` with the 5-mode one, `fourfold_degeneracy.py` and
 `eigenspace_slice.py` with the 10-mode one of [`scripts/`](scripts).
-`cluster_subsets.py`, `multipliers_by_wavenumber.py` and
-`mesh_axial_resolution.py`, of the Reassessment, run from this directory,
-the first two on the stored results in [`results/`](results), the third
-with the library on `PYTHONPATH`.
+`cluster_subsets.py` and `convergence_post.py` run from this directory on
+the stored results in `results/`.
 
 ## References
 

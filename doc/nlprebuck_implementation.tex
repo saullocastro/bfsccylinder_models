@@ -152,6 +152,30 @@ removed at $x = 0$ instead of $x = L/2$.  On the shell of
 linear pre-buckling state and 5.2 per cent with the nonlinear one, and moves
 $b_{1111}$ from $-0.044$ to $+0.137$ and from $-0.052$ to $-0.297$.
 
+Inertia relief, \texttt{edges='SS3-IR'} and \texttt{'free-IR'}: the axial
+load on both edges and no node anchored.  SS3-IR keeps $v = w = 0$ along both
+edges; free-IR fixes nothing.  Every rigid body mode $\boldsymbol{R}$ the
+edges leave free (the axial translation for SS3-IR, all six for free-IR) is
+removed by the condition $\boldsymbol{C}^T\boldsymbol{a} = 0$,
+$\boldsymbol{C} = \boldsymbol{T}^T\boldsymbol{M}\boldsymbol{R}$, with
+$\boldsymbol{M}$ the consistent mass matrix: the centre of mass does not move
+and the shell does not rotate as a whole.  The condition is imposed exactly:
+by elimination in the static solves, as the inverse of the constitutive
+stiffness on the null space of $\boldsymbol{C}^T$ in the generalized mode of
+ARPACK, and as a further border of the bordered system of the second order
+fields and of the axisymmetric pre-buckling solves.  The axial translation
+and the rotation about the axis are null vectors of $\boldsymbol{K}_{C0}$ to
+round off; the transverse translations and rotations only to the
+interpolation error of $\cos\theta$ and $\sin\theta$ ($10^{-9}$ and
+$2\times10^{-5}$ of the energy of a smooth field at $n_y = 40$), and the
+rotations are not null vectors of the geometric stiffness matrix, so
+anchoring a statically determinate set of nodes and subtracting the rigid
+component afterwards would not be exact.  On the shell above, SS3-IR gives
+the SS3 buckling load to $10^{-12}$ and $b_{1111}$ to $5\times10^{-9}$, with
+the linear and the nonlinear pre-buckling state.  With free-IR the lowest
+modes are the $n = 2$, 3 and 4 ovalizations of the free edges, at about 2
+per cent of the SS3 buckling load at $n_y = 40$ and 1 per cent at $n_y = 80$.
+
 %==============================================================================
 \section{Kinematics}
 %==============================================================================

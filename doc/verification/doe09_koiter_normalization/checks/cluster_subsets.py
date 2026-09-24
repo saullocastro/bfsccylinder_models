@@ -22,7 +22,7 @@ used by reassessment_post.py as well.
 
 usage, from doc/verification/doe09_koiter_normalization:
 
-    python checks/cluster_subsets.py [results/DOE09_conv_k5g.jsonl.gz ...] [--nys 160,200,240]
+    python checks/cluster_subsets.py [results/DOE09_conv_ir.jsonl.gz ...] [--nys 160,200,240]
 """
 import gzip
 import itertools
@@ -168,4 +168,4 @@ if __name__ == '__main__':
         i = args.index('--nys')
         nys = tuple(int(v) for v in args[i + 1].split(','))
         del args[i:i + 2]
-    main(args or [os.path.join('results', 'DOE09_conv_k5g.jsonl.gz')], nys)
+    main(args or [os.path.join('results', 'DOE09_conv_ir.jsonl.gz')], nys)
