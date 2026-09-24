@@ -90,7 +90,78 @@ def test_SS4_Waters_shell():
     assert np.isclose(b, 0.13687095361424786, rtol=1e-4)
 
 
+def _waters(ny):
+    E11 = 127.629e9 # Pa
+    E22 = 11.3074e9 # Pa
+    G12 = 6.00257e9 # Pa
+    nu12 = 0.300235
+    stack = [45, -45, 0, 90, 90, 0, -45, 45]
+    plyt = 0.00012692375 # m
+    nx = int(ny*L/(2*np.pi*R))
+    if nx % 2 == 0:
+        nx += 1
+    laminaprop = (E11, E22, nu12, G12, G12, G12)
+    prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt,
+            offset=0, rho=1611)
+    return nx, prop
+
+
+def test_rigid_body_modes():
+    #NOTE Tx and Rx are in the finite element space, and every mode is
+    #     rigid: the stiffness matrix annihilates them to round off or to the
+    #     interpolation error of cos and sin, see rigid_body_modes
+    from bfsccylinder_models.edges import rigid_body_modes, mass_matrix
+    x, y = _mesh(5, 8)
+    modes = rigid_body_modes(x, y, R, DOF)
+    assert modes.shape == (DOF*x.shape[0], 6)
+    assert np.linalg.matrix_rank(modes) == 6
+
+
+def test_SS3_IR_is_SS3():
+    """No node anchored, the axial translation removed by inertia relief:
+    the rigid translation is a null vector of every operator, so Pcr and b
+    are those of SS3"""
+    ny = 40
+    nx, prop = _waters(ny)
+    for NLprebuck in (False, True):
+        out = {}
+        for edges in ('SS3', 'SS3-IR'):
+            out[edges] = fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=4,
+                    koiter_num_modes=1, Nxxunit=1000., NLprebuck=NLprebuck,
+                    NLprebuck_eps1=0.0005, edges=edges)
+        assert np.isclose(out['SS3-IR']['Pcr'], out['SS3']['Pcr'],
+                          rtol=1e-9)
+        b = [out[e]['koiter']['b_ijkl'][(0, 0, 0, 0)]
+             for e in ('SS3', 'SS3-IR')]
+        assert np.isclose(b[1], b[0], rtol=1e-6)
+        #NOTE and the axial displacement has no mean, in the mass metric
+        u0 = out['SS3-IR']['koiter']['u0'].reshape(-1, DOF)
+        assert abs(u0[:, 0].mean()) <= 1e-10*np.abs(u0[:, 0]).max()
+
+
+def test_free_IR_modes_are_not_rigid():
+    """Free edges: the six rigid body modes removed, the lowest buckling
+    modes the n = 2 ovalization of the free edges"""
+    from bfsccylinder_models.edges import rigid_body_modes
+    ny = 40
+    nx, prop = _waters(ny)
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=4,
+            koiter_num_modes=0, Nxxunit=1000., edges='free-IR')
+    modes = rigid_body_modes(out['x'], out['y'], R, DOF)
+    for j in range(4):
+        phi = out['eigvecs'][:, j]
+        c = np.linalg.lstsq(modes, phi, rcond=None)[0]
+        #NOTE to the tolerance of the eigen solver, 1e-6
+        assert np.linalg.norm(modes @ c) <= 1e-6*np.linalg.norm(phi)
+    W = out['eigvecs'][:, 0].reshape(-1, DOF)[:, 6].reshape(nx, ny)
+    assert np.argmax(np.abs(np.fft.rfft(W, axis=1)).sum(axis=0)) == 2
+    assert np.isclose(out['load_mult'][0], out['load_mult'][1], rtol=1e-6)
+
+
 if __name__ == '__main__':
     test_SS3_space_is_the_selection()
     test_SS4_space()
     test_SS4_Waters_shell()
+    test_rigid_body_modes()
+    test_SS3_IR_is_SS3()
+    test_free_IR_modes_are_not_rigid()

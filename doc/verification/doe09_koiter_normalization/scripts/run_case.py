@@ -4,7 +4,7 @@ pre-buckling state
 usage: python run_case.py ICASE LIN|NL [NY] [--distinct K] [--num-eigvals N]
                          [--axial-factor F] [--eps1 E] [--nint P]
                          [--kinematics sanders|donnell] [--thickness-factor T]
-                         [--nxxunit N] [--edges SS3|SS4]
+                         [--nxxunit N] [--edges SS3|SS4|SS3-IR|free-IR]
 
 NY overrides ny below, for the convergence study. The options, for the
 reassessment studies (generate_qsubs_reassess.py), override
@@ -113,8 +113,11 @@ Nxxunit = 1000.
 #     their RESULT lines have no ss_edge_tangential
 ss_edge_tangential = True
 #NOTE edge condition of the model, see bfsccylinder_models/edges.py: SS3, u
-#     free, or SS4, u uniform along each edge, zero at x = 0 and one shared
-#     unknown at x = L, under the same axial load
+#     free, SS4, u uniform along each edge, zero at x = 0 and one shared
+#     unknown at x = L, under the same axial load, SS3-IR, SS3 with the axial
+#     translation removed by inertia relief instead of at a node, and
+#     free-IR, no edge condition, the six rigid body modes removed by inertia
+#     relief
 edges = 'SS3'
 #NOTE k and ncv of every call to eigsh, and the ARPACK error of a call
 #     retried with a larger ncv, see use_safe_solvers
@@ -188,9 +191,9 @@ def use_distinct_modes():
     eigsh = model.eigsh
     KCuu = [None]
 
-    def keep_KC(A, k, which, M, tol, v0):
+    def keep_KC(A, k, which, M, tol, v0, **kwargs):
         KCuu[0] = M
-        return eigsh(A=A, k=k, which=which, M=M, tol=tol, v0=v0)
+        return eigsh(A=A, k=k, which=which, M=M, tol=tol, v0=v0, **kwargs)
 
     model.eigsh = keep_KC
 
@@ -380,7 +383,12 @@ def use_safe_solvers():
             return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
                     tol=tol, v0=v0, ncv=call['ncv'], **kwargs)
 
-    def eigsh(A, k, which, M, tol, v0):
+    def eigsh(A, k, which, M, tol, v0, Minv=None):
+        #NOTE the inertia relief edges give the inverse of M on the null
+        #     space of their condition, M being singular, see edges.py
+        if Minv is not None:
+            return arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol,
+                    v0=v0)
         solver, Mu = cholesky(M)
         Minv = scipy.sparse.linalg.LinearOperator(M.shape, dtype=np.float64,
                 matvec=lambda x: solver.solve(Mu, np.ascontiguousarray(x)))
@@ -763,7 +771,8 @@ if __name__ == '__main__':
             help='factor on tow_thick, default %(default)s')
     parser.add_argument('--nxxunit', type=float, default=Nxxunit,
             help='load unit in N/m, default %(default)s')
-    parser.add_argument('--edges', choices=['SS3', 'SS4'], default=edges,
+    parser.add_argument('--edges', choices=['SS3', 'SS4', 'SS3-IR', 'free-IR'],
+            default=edges,
             help='edge condition, default %(default)s')
     args = parser.parse_args()
     icase = args.icase

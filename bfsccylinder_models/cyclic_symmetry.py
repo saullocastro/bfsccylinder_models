@@ -75,12 +75,14 @@ def project_axisymmetric(u, axi_order, imid, DOF):
     invariant subspace. The axial rigid body translation is removed
     afterwards, by making the axial displacement vanish at the axial station
     imid, the single node constraint that suppresses it in the models not
-    being axisymmetric itself.
+    being axisymmetric itself. imid None leaves it, for the inertia relief
+    edges, whose condition the average keeps.
     """
     nx, ny = axi_order.shape
     U = u.reshape(-1, DOF)[axi_order]
     U = np.repeat(U.mean(axis=1, keepdims=True), ny, axis=1)
-    U[:, :, 0] -= U[imid, 0, 0]
+    if imid is not None:
+        U[:, :, 0] -= U[imid, 0, 0]
     uaxi = np.zeros((nx*ny, DOF), dtype=np.float64)
     uaxi[axi_order] = U
     return uaxi.reshape(-1)

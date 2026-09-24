@@ -17,7 +17,8 @@ from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
         axisymmetric_basis, project_axisymmetric, canonical_modes,
         degenerate_partner)
-from bfsccylinder_models.edges import edge_space
+from bfsccylinder_models.edges import edge_space, mass_matrix
+from bfsccylinder.sanders import update_M, M_SPARSE_SIZE
 from bfsccylinder_models.koiter_tensors import (koiter_element_tensors,
         a_coefficients, b_coefficients)
 
@@ -155,7 +156,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
 
     # applying boundary conditions
     #NOTE u = T a, a the independent unknowns, see edges.py
-    space = edge_space(x, L, DOF, edges=edges, y=y)
+    space = edge_space(x, L, DOF, edges=edges, y=y, R=R)
+    if space.rigid is not None:
+        #NOTE inertia relief of the rigid body modes the edges leave
+        #     free, in the metric of the consistent mass matrix
+        space.set_mass(mass_matrix(elements, update_M, M_SPARSE_SIZE, N,
+                [prop.h]*num_elements,
+                [prop.intrho/prop.h]*num_elements))
+        print('# inertia relief of', ', '.join(space.rigid_names))
 
     print('# starting static analysis')
 
@@ -202,7 +210,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
 
     # solving
-    uu = spsolve(KC0uu, space.force(fext))
+    uu = space.solve(KC0uu, space.force(fext), spsolve)
     cg_x0 = uu.copy()
 
     u0 = space.expand(uu)
@@ -217,10 +225,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     removed, the one of the constraint that suppresses it
     if edges == 'SS4':
         axi_imid = 0
+    elif edges.endswith('-IR'):
+        #NOTE removed by the inertia relief condition instead
+        axi_imid = None
     else:
         axi_imid = np.argmin(np.abs(xlin - L/2.))
 
     Baxi, buaxi = axisymmetric_basis(axi_order, space.free, DOF)
+    Caxi = space.axisymmetric_condition(Baxi, buaxi)
 
     def project_axi(u):
         return project_axisymmetric(u, axi_order, axi_imid, DOF)
@@ -242,7 +254,20 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         #     equilibrates internally, this dense one does not. Iterates are
         #     unchanged to ten digits on ny=60, so it is a guard, not a fix
         d = 1/np.sqrt(np.abs(Krf.diagonal()))
-        a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :], d*rr[buaxi])
+        if Caxi is None:
+            a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :],
+                    d*rr[buaxi])
+            return Baxi @ a
+        #NOTE the inertia relief condition as a border, the axisymmetric
+        #     rigid body modes being null vectors of Krf
+        Cs = np.linalg.qr(d[:, None]*Caxi)[0]
+        n, k = Cs.shape
+        A = np.zeros((n + k, n + k))
+        A[:n, :n] = d[:, None]*Krf*d[None, :]
+        A[:n, n:] = Cs
+        A[n:, :n] = Cs.T
+        a[buaxi] = d*np.linalg.solve(A, np.concatenate((d*rr[buaxi],
+                np.zeros(k))))[:n]
         return Baxi @ a
 
     u0_lin = project_axi(u0)
@@ -266,8 +291,12 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
-        eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
-                tol=1e-6, v0=v0)
+        if space.C is None:
+            eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM',
+                    M=KCuu, tol=1e-6, v0=v0)
+        else:
+            eigvals, eigvecsu = space.eigsh(KGuu, KCuu, num_eigvals, v0,
+                    1e-6, eigsh)
         mu = -1/eigvals
         return eigvals, canonical_modes(mu, eigvecsu, space,
                 axi_order, DOF), mu
@@ -721,8 +750,17 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     nu = space.size
     W = space.force(phi20)
 
-    bordered = bmat([[phi2uu, csc_matrix(Nsp)],
-                     [csc_matrix(W).T, None]], format='csc')
+    Cb = space.border()
+    if Cb is None:
+        bordered = bmat([[phi2uu, csc_matrix(Nsp)],
+                         [csc_matrix(W).T, None]], format='csc')
+        num_border = num_cond
+    else:
+        #NOTE and the inertia relief condition, C.T uab = 0
+        bordered = bmat([[phi2uu, csc_matrix(Nsp), csc_matrix(Cb)],
+                         [csc_matrix(W).T, None, None],
+                         [csc_matrix(Cb).T, None, None]], format='csc')
+        num_border = num_cond + Cb.shape[1]
 
     #NOTE cstq[i, j, k] = cst_ab[(i, j)] @ ucond[k]
     cstq = np.tensordot(cst, Ucond, axes=(0, 0))
@@ -737,9 +775,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
             if modej < modei:
                 uab[(modei, modej)] = uab[(modej, modei)]
                 continue
-            rhs = np.zeros(nu + num_cond)
+            rhs = np.zeros(nu + num_border)
             rhs[:nu] = space.force(force2ndorder_ij(modei, modej))
-            rhs[nu:] = -cstq[modei, modej]
+            rhs[nu:nu + num_cond] = -cstq[modei, modej]
             sol = spsolve(bordered, rhs)
             uijbar = space.expand(sol[:nu])
             uab[(modei, modej)] = uijbar
