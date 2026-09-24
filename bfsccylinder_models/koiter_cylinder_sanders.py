@@ -155,8 +155,16 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     bk = np.zeros(N, dtype=bool)
 
     checkSS = isclose(x, 0) | isclose(x, L)
+    #NOTE every degree of freedom fixed at the edge nodes is fixed together
+    #     with its derivative along the edge, d/dy, so that the Hermite
+    #     interpolation along the edge makes it zero along the whole edge and
+    #     not at the nodes only: v with v,y and w with w,y. Fixing v and w
+    #     alone left the edges free to deflect between the nodes, an error
+    #     that vanishes only as the circumferential element length does
     bk[3::DOF] = checkSS
+    bk[5::DOF] = checkSS
     bk[6::DOF] = checkSS
+    bk[8::DOF] = checkSS
     check = isclose(x, L/2.) & isclose(y, 0)
     assert check.sum() == 1
     bk[0::DOF] = check

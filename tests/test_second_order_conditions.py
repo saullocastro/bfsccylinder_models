@@ -75,8 +75,12 @@ def _unknown_dofs(out):
     x, y = out['x'], out['y']
     bk = np.zeros(DOF*x.shape[0], dtype=bool)
     edges = np.isclose(x, 0) | np.isclose(x, L)
+    #NOTE v and w with their derivatives along the edge, v,y and w,y, as
+    #     the model does, so that v = w = 0 along the whole edge
     bk[3::DOF] = edges
+    bk[5::DOF] = edges
     bk[6::DOF] = edges
+    bk[8::DOF] = edges
     bk[0::DOF] = np.isclose(x, L/2.) & np.isclose(y, 0)
     return ~bk
 

@@ -197,11 +197,23 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     bk = np.zeros(N, dtype=bool)
 
     checkSS = isclose(x, 0) | isclose(x, L)
+    #NOTE every degree of freedom fixed at the edge nodes is fixed together
+    #     with its derivative along the edge, d/dy, so that the Hermite
+    #     interpolation along the edge makes it zero along the whole edge and
+    #     not at the nodes only: u with u,y, v with v,y, w with w,y and, when
+    #     clamped, w,x with w,xy. The prescribed u is the same at every node
+    #     of the edge, so u,y = 0 is consistent with it. Fixing the nodal
+    #     values alone left the edges free to deflect between the nodes, an
+    #     error that vanishes only as the circumferential element length does
     bk[0::DOF] = checkSS
+    bk[2::DOF] = checkSS
     bk[3::DOF] = checkSS
+    bk[5::DOF] = checkSS
     bk[6::DOF] = checkSS
+    bk[8::DOF] = checkSS
     if clamped:
         bk[7::DOF] = checkSS
+        bk[9::DOF] = checkSS
     bu = ~bk # same as np.logical_not, defining unknown DOFs
 
     print('# starting static analysis')

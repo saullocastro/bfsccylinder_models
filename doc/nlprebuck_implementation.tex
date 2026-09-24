@@ -82,6 +82,54 @@ built from $N_{xx}^{\text{unit}}$.  Two load levels are distinguished:
 $\lambda_b$, at which the pre-buckling state is evaluated, and $\lambda_c$,
 the bifurcation load.
 
+\subsection{Edge conditions}
+\label{sec:edges}
+
+SS-3 at $x = 0$ and $x = L$: $v = w = 0$, the rotation and $u$ free, $u$
+loaded by $N_{xx}$, and $u$ fixed at a single node against the axial rigid
+body translation.  Every degree of freedom fixed at the edge nodes is fixed
+together with its derivative along the edge, $v$ with $v_{,y}$ and $w$ with
+$w_{,y}$, since the Hermite interpolation of the element builds $v$ and $w$
+along the edge from both.  Fixing $v$ and $w$ alone, as all the models did
+before, made them vanish at the nodes only, the edge being free to deflect
+between them, and the edge was softer than a simply supported one by an
+amount that vanishes only with the circumferential element length.
+
+On the shell of \citet{arbocz2001}, with the mesh rule of the tests
+($n_x \simeq 1.5\,n_y L/(2\pi r)$), von K\'arm\'an kinematics,
+\texttt{NLprebuck=True} and $\lambda_b/\lambda_c = 0.9997$
+(\texttt{doc/verification/doe09\_koiter\_normalization/checks/edge\_condition\_benchmark.py};
+ANILISA: $\lambda_c = 0.328594$ and $b = -0.37605$ at $n = 11$):
+
+\begin{center}
+\begin{tabular}{rcccccc}
+\toprule
+ & \multicolumn{3}{c}{along the whole edge} & \multicolumn{3}{c}{at the edge nodes only} \\
+$n_y$ & $n$ & $\lambda_c$ & $b_{1111}$ & $n$ & $\lambda_c$ & $b_{1111}$ \\
+\midrule
+ 24 &  9 & 0.37099 & $-0.3653$ &  7 & 0.23819 & $+1.0107$ \\
+ 32 &  9 & 0.35677 & $-0.2554$ &  9 & 0.29312 & $+0.7186$ \\
+ 40 & 10 & 0.33609 & $-0.4161$ & 10 & 0.33110 & $-0.3348$ \\
+ 50 & 11 & 0.33194 & $-0.4209$ & 11 & 0.33069 & $-0.4068$ \\
+ 60 & 11 & 0.33054 & $-0.3546$ & 11 & 0.33003 & $-0.3525$ \\
+ 80 & 11 & 0.32936 & $-0.3615$ & 11 & 0.32921 & $-0.3608$ \\
+100 & 11 & 0.32899 & $-0.3628$ & 11 & 0.32893 & $-0.3624$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The nodal condition put the buckling load 28 and 11 per cent below the
+reference at $n_y = 24$ and $32$, fewer than four elements per wave, with a
+positive $b$, and approached it from below; the edge condition approaches it
+from above, as a conforming discretisation does.  From $n_y = 50$ the two
+differ by less than $0.4$ per cent in $\lambda_c$, and from $n_y = 80$, seven
+elements per wave, by $0.05$ per cent in $\lambda_c$ and $0.2$ per cent in
+$b_{1111}$.  The agreement of the coarse meshes with the references quoted in
+earlier versions of this document came partly from the two errors
+cancelling.  The figures of Sections~\ref{sec:canonical} to
+\ref{sec:cts-recommendation} that were measured with the nodal condition say
+so.
+
 %==============================================================================
 \section{Kinematics}
 %==============================================================================
@@ -635,7 +683,8 @@ implementation.
 
 That would not matter if the post-buckling coefficients were invariant under
 that rotation, and they are not.  Measured on the Sun shell with $n_y = 40$
-and $n = 10$, rotating the critical pair by $30$ degrees moves $b_{1111}$ from
+and $n = 10$, with the nodal edge condition of Section~\ref{sec:edges},
+rotating the critical pair by $30$ degrees moves $b_{1111}$ from
 $-0.230556$ to $-0.192752$, sixteen per cent, with the pre-buckling state and
 the buckling load unchanged to eleven digits; on the Arbocz shell, with the
 same $n_y$ and $n$, it moves from $-0.335975$ to $-0.260672$.  Before the
@@ -816,13 +865,18 @@ than from $b_{1111}$ alone.  Matching the reference $b$ is a question of
 discretisation, examined in Section~\ref{sec:gap}.
 
 The second is that the non-linear pre-buckling state does not merely move the
-modes, it \emph{separates} them.  With \texttt{NLprebuck=False} the cluster
-has no boundary worth the name, the next pair sitting $0.26$ to $0.28$ per
-cent above the last one retained, so any truncation is arbitrary.  With
-\texttt{NLprebuck=True} a genuine spectral gap opens, $0.99$ and $2.29$ per
-cent, an order of magnitude wider than the spacing inside the cluster.  Only
-then is ``the cluster'' a well-defined set, and only then is a multi-mode
-truncation of it well posed.  The pre-buckling treatment of this document is
+modes, it \emph{separates} them.  On the Sun shell at $n_y = 40$, with
+\texttt{NLprebuck=True} four pairs lie within $1.4$ per cent of the critical
+multiplier (1, 1.0044, 1.0052, 1.0136) and the fifth $2.2$ per cent above the
+fourth, $2.7$ times the widest spacing inside the cluster; with
+\texttt{NLprebuck=False} the critical pair is alone, $3.5$ per cent below the
+next.  With the nodal edge condition of Section~\ref{sec:edges} the same mesh
+had no boundary worth the name with \texttt{NLprebuck=False}, the next pair
+sitting $0.26$ to $0.28$ per cent above the last one retained, and a gap of
+$0.99$ and $2.29$ per cent with \texttt{NLprebuck=True}: the edges free to
+deflect between the nodes added near-critical modes.  Only with the
+non-linear state is ``the cluster'' a well-defined set, and only then is a
+multi-mode truncation of it well posed.  The pre-buckling treatment of this document is
 therefore a prerequisite for multi-mode Koiter, not an alternative to it.
 
 Three pieces of the implementation used to stand between this and a
@@ -1395,43 +1449,52 @@ separates the two rows with the same $n_y$ and $n$.  Buckling loads are normalis
 \subsection{Buckling loads}
 
 \begin{center}
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \toprule
- & $n$ & $\lambda_c$ & reference \\
+ & $n$ & $\lambda_c$ & nodal edges & reference \\
 \midrule
-Arbocz, $n_y = 40$ & $10$ & $0.331413$ & $0.329163$ (ANILISA, $n=10$) \\
-Arbocz, $n_y = 60$ & $11$ & $0.330603$ & $0.328594$ (ANILISA, $n=11$) \\
-                        &      &            & $0.327759$ (STAGS-A, $n=11$) \\
-Sun, $n_y = 40$    & $10$ & $0.346127$ & --- \\
-Sun, $n_y = 50$    & $10$ & $0.347283$ & --- \\
+Arbocz, $n_y = 40$ & $10$ & $0.336760$ & $0.331413$ & $0.329163$ (ANILISA, $n=10$) \\
+Arbocz, $n_y = 60$ & $11$ & $0.331066$ & $0.330603$ & $0.328594$ (ANILISA, $n=11$) \\
+                        &      &            &            & $0.327759$ (STAGS-A, $n=11$) \\
+Sun, $n_y = 40$    & $7$  & $0.354920$ & $0.346127$ ($n = 10$) & --- \\
+Sun, $n_y = 50$    & $10$ & $0.348965$ & $0.347283$ & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The two Arbocz meshes agree with the ANILISA entry for their own
-circumferential wave number to $0.7$ and $0.6$ per cent respectively, and
-the finer one with the Level-3 STAGS-A value to $0.9$ per cent.  The membrane
+``Nodal edges'' is the edge condition before Section~\ref{sec:edges}, $v$
+and $w$ fixed at the edge nodes only.  The two Arbocz meshes are above the
+ANILISA entry for their own circumferential wave number by $2.3$ and $0.75$
+per cent respectively, and the finer one above the Level-3 STAGS-A value by
+$1.0$ per cent; with the nodal edges they were $0.7$, $0.6$ and $0.9$ per
+cent, the softer edges making up for the stiffness of the coarse mesh, see
+Section~\ref{sec:edges}.  The membrane
 pre-buckling regime, which is what the computation returns when the expansion
 point is left at the reference load, gives $0.365992$ instead.
 
 \subsection{Post-buckling coefficients}
 
 \begin{center}
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \toprule
- & $n$ & $b_{1111}$ & reference \\
+ & $n$ & $b_{1111}$ & nodal edges & reference \\
 \midrule
-Arbocz, $n_y = 40$ & $10$ & $-0.335975$ & --- \\
-Arbocz, $n_y = 60$ & $11$ & $-0.356457$ & $-0.37605$ (ANILISA, $n=11$) \\
-                        &      &             & $-0.3772$ (Sun, Table~2) \\
-Sun, $n_y = 40$    & $10$ & $-0.230556$ & --- \\
-Sun, $n_y = 50$    & $10$ & $-0.222760$ & --- \\
+Arbocz, $n_y = 40$ & $10$ & $-0.423807$ & $-0.335975$ & --- \\
+Arbocz, $n_y = 60$ & $11$ & $-0.358347$ & $-0.356457$ & $-0.37605$ (ANILISA, $n=11$) \\
+                        &      &             &             & $-0.3772$ (Sun, Table~2) \\
+Sun, $n_y = 40$    & $7$  & $-0.052152$ & $-0.230556$ ($n = 10$) & --- \\
+Sun, $n_y = 50$    & $10$ & $-0.234711$ & $-0.222760$ & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The $n_y = 60$ value is $5.2$ per cent short of the ANILISA coefficient for
-the same mode, a difference Section~\ref{sec:gap} takes apart.  A negative
+The $n_y = 60$ value is $4.7$ per cent short of the ANILISA coefficient for
+the same mode ($5.2$ per cent with the nodal edges), a difference
+Section~\ref{sec:gap} takes apart; the edge condition of
+Section~\ref{sec:edges} does not account for it, the two conditions giving
+$b_{1111}$ within $0.2$ per cent of each other from $n_y = 80$.  The Sun test
+runs $n_y = 50$ since the edge condition, $n_y = 40$ with $n_x = 11$ buckling
+in an $n = 7$ mode.  A negative
 $b$ means an imperfection sensitive shell, which is what this one is.
 
 \subsection{The gap to ANILISA}
@@ -1441,7 +1504,10 @@ The difference is not that of a single-mode expansion to a multi-mode one:
 the ANILISA coefficient and that of Sun~Table~2 are single-mode coefficients
 too.  It is taken apart below on the Arbocz shell, von K\'arm\'an kinematics,
 every figure from \texttt{doc/verification/reference\_b\_convergence.py}, and
-every mesh buckling with $n = 11$.
+every mesh buckling with $n = 11$.  They were measured with the nodal edge
+condition of Section~\ref{sec:edges}, which on these meshes, $n_y \ge 60$,
+changes $b_{1111}$ by $0.6$ per cent at most and by $0.2$ per cent from
+$n_y = 80$.
 
 \emph{Normalisation.}  At the $n_y = 60$, $n_x = 25$ mesh of the table above
 the crest of the mode stands $0.2$ per cent above its largest nodal
@@ -1524,7 +1590,11 @@ imperfection sensitivity enabled by continuous tow shearing and machine
 learning}, Materials \textbf{15} (2022) 4117.  The algorithm is taken
 literally from the constant-stiffness models, and a check in the test suite
 asserts that the shared regions of the two files are identical character for
-character, so only what is specific to the CTS model is documented here.
+character, so only what is specific to the CTS model is documented here.  The
+figures of Sections~\ref{sec:cts-scales} to \ref{sec:cts-recommendation}
+were measured with the nodal edge condition of Section~\ref{sec:edges}; the
+change on the meshes of the DOE09 designs is measured in
+\texttt{doc/verification/doe09\_koiter\_normalization/REPORT.md}.
 
 \subsection{Why the axisymmetric reduction still applies}
 \label{sec:cts-axi}

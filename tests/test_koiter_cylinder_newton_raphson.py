@@ -17,10 +17,11 @@ def test_Sun_et_al():
     #Fig. 3 of that paper. Geometry, laminate and material properties are taken
     #from the text of Section 3.1, and the classical simply-supported boundary
     #condition SS-3 is used, as in the paper.
-    #NOTE ny=40 keeps this test at about 35 s. The ny=50 mesh takes about
-    #     twice as long and gives Ncr/Ncl = 0.347283 with the same n=10
-    #     circumferential waves and b_1111 = -0.222760
-    ny = 40
+    #NOTE ny=50, about 70 s. With v and w fixed along the whole edge, ny=40
+    #     (nx = 11) buckles with n=7, Ncr/Ncl = 0.354920 and b_1111 =
+    #     -0.052152; with v and w fixed at the edge nodes only it buckled with
+    #     n=10, 0.346127 and -0.230556, and ny=50 gave 0.347283 and -0.222760
+    ny = 50
     R = 0.2032 # m, R = 203.2 mm
     L = 0.3556 # m, L = 355.6 mm
     nx = int(ny*L/(2*np.pi*R))
@@ -51,22 +52,24 @@ def test_Sun_et_al():
     #     normalized by Ncl, and ANILISA and DIANA 0.3286 and 0.3244. The
     #     ANILISA n-search with rigorous nonlinear pre-buckling and SS-3 gives
     #     0.337088 at n=7 and its minimum 0.328594 at n=11 (Table 3 of Arbocz,
-    #     Starnes and Nemeth, AIAA-2001-1392). This mesh buckles with n=10, as
-    #     does ny=50. REGRESSION value for this mesh, not a converged one
-    assert np.isclose(Ncr/Ncl, 0.346127, rtol=0.01)
+    #     Starnes and Nemeth, AIAA-2001-1392). This mesh buckles with n=10.
+    #     REGRESSION value for this mesh, not a converged one
+    assert np.isclose(Ncr/Ncl, 0.348965, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
     #NOTE REGRESSION value for this mesh, not a converged one, and not
     #     comparable to the b = -0.3772 of Table 2 (ANILISA -0.3761, DIANA
-    #     -0.3743), which belongs to the n=11 mode. ny=50 gives -0.222760,
-    #     3.4% away. Rotating the critical mode by 30 degrees inside its pair
+    #     -0.3743), which belongs to the n=11 mode. The values of the rest of
+    #     this note are those of ny=40 with v and w fixed at the edge nodes
+    #     only, b_1111 = -0.230556. Rotating the critical mode by 30 degrees
+    #     inside its pair
     #     moves it to -0.192752, almost all of it through the normalization by
     #     the largest nodal translation, which misses the crest of this skewed
     #     mode by 22%: normalized by the crest the two members give -0.15456
     #     and -0.15022. canonical_modes fixes the member, which makes the value
     #     reproducible, 2e-8 between a single and a multi threaded run. See
     #     "Buckling modes of a cylinder" in doc/nlprebuck_implementation.tex
-    assert np.isclose(b_1111, -0.230556, rtol=0.05)
+    assert np.isclose(b_1111, -0.234711, rtol=0.05)
 
 
 def test_Arbocz_Starnes_2002():
@@ -79,9 +82,11 @@ def test_Arbocz_Starnes_2002():
     L = 0.3556 # m, 14.0 in = 355.600 mm
     R = 0.20318603 # m, 7.99945 in = 203.18603 mm
     #NOTE ny=40 keeps this test at about 40 s. The ny=60 mesh, which needs
-    #     bfsccylinder >= 0.6.0 to converge, gives lambda_c = 0.330603 with
-    #     n=11 circumferential waves and b_1111 = -0.356457, the figures worth
-    #     comparing with the literature below
+    #     bfsccylinder >= 0.6.0 to converge, gives lambda_c = 0.331066 with
+    #     n=11 circumferential waves and b_1111 = -0.358347, the figures worth
+    #     comparing with the literature below (0.330603 and -0.356457 with v
+    #     and w fixed at the edge nodes only, and 0.331413 and -0.335975 at
+    #     ny=40, against 0.336760 and -0.423807 now)
     ny = 40
 
     nx = int(1.5*ny*L/(2*np.pi*R))
@@ -116,16 +121,16 @@ def test_Arbocz_Starnes_2002():
     #     AXBIF, n=7). The Level-2 ANILISA n-search with rigorous nonlinear
     #     pre-buckling gives 0.329163 at n=10 and its minimum 0.328594 at n=11,
     #     and Level-3 STAGS-A 0.327759 (n=11, 161x201 mesh). This mesh buckles
-    #     with n=10, 0.7% above the ANILISA n=10 entry; ny=60 buckles with n=11,
-    #     0.6% above the n=11 one. REGRESSION values for their mesh
-    assert np.isclose(lambda_c, 0.331413, rtol=0.01)
+    #     with n=10, 2.3% above the ANILISA n=10 entry; ny=60 buckles with n=11,
+    #     0.8% above the n=11 one. REGRESSION values for their mesh
+    assert np.isclose(lambda_c, 0.336760, rtol=0.01)
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]
     print('b_1111', b_1111)
     #NOTE REGRESSION value for this mesh, not a converged one. Level-2
     #     ANILISA gives b = -0.37605 for the n=11 mode with rigorous nonlinear
     #     pre-buckling (alpha = 0.46663, beta = -0.22174), and Sun et al.
     #     Table 2 -0.3772. This mesh buckles with n=10; ny=60 buckles with n=11
-    #     and gives -0.356457, 5% short of ANILISA. That gap is not the
+    #     and gives -0.358347, 4.7% short of ANILISA. That gap is not the
     #     single-mode truncation, the reference coefficients being single-mode
     #     ones too; "The gap to ANILISA" in doc/nlprebuck_implementation.tex
     #     takes it apart, leaving about 4% of b unexplained by the
@@ -134,7 +139,7 @@ def test_Arbocz_Starnes_2002():
     #     A negative b is an imperfection sensitive shell, which this one is.
     #     b came out positive, +0.410664, until bfsccylinder 0.6.0 made the
     #     tangent stiffness matrix consistent with the internal force vector
-    assert np.isclose(b_1111, -0.335975, rtol=0.05)
+    assert np.isclose(b_1111, -0.423807, rtol=0.05)
 
 if __name__ == '__main__':
     test_Arbocz_Starnes_2002()
