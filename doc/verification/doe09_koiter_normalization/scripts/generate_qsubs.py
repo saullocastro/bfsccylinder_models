@@ -64,9 +64,11 @@ def done(outname):
         for line in f:
             if line.startswith('RESULT '):
                 result = json.loads(line[len('RESULT '):])
-                #NOTE b_min_energy, see koiter_post.py
+                #NOTE crest and RMS of w from the element, see ElementField in
+                #     run_case.py
                 return (result.get('koiter_num_modes') == koiter_num_modes
-                        and ('b_min_energy' in result or 'error' in result))
+                        and (result.get('crest_method') == 'element_orbit'
+                             or 'error' in result))
     return False
 
 

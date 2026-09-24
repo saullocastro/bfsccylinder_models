@@ -25,7 +25,10 @@ from scipy.sparse import triu
 import bfsccylinder_models
 import bfsccylinder_models.koiter_cylinder_CTS_sanders as model
 from bfsccylinder_models.koiter_cylinder_CTS_sanders import fkoiter_cylinder_CTS_circum
+
+from bfsccylinder.sanders import BFSCCylinderSanders
 from bfsccylinder_models.cyclic_symmetry import mesh_order, rotated
+from scipy.optimize import minimize
 
 import koiter_post
 
@@ -393,60 +396,153 @@ def mode_harmonics(out, k):
     return int(np.argmax(P)), float(P[0])
 
 
-def mode_amplitudes(out, k):
-    """Crest and RMS radial amplitude of Koiter mode k, over its nodal one
+class ElementField:
+    """w of a field anywhere on the mesh, from the kinematics of the element
 
-    The models scale every Koiter mode so that its largest nodal translation
-    equals the thickness, which misses the crest of a mode falling between
-    two axial stations and makes b_ijkl oscillate with the mesh, see
-    "Normalising the modes" in doc/nlprebuck_implementation.tex of
-    bfsccylinder_models. Both amplitudes are returned in units of that
-    largest nodal translation, so that the mode rescaled by s_k = 1/crest or
-    s_k = 1/rms has a crest, or an RMS of w over the surface, equal to the
-    thickness, see koiter_post.py.
+    w inside an element is Sw(xi, eta) @ q, q the 40 degrees of freedom of
+    its four nodes, with Sw from update_Sw of BFSCCylinderSanders, the element
+    the model is assembled with, so that no interpolation is assumed here. Sw
+    depends on xi, eta, lex and ley only, and is evaluated once per element
+    length. Amplitudes are returned over the largest nodal translation of
+    Koiter mode 0, the thickness to which the models scale every mode
+    """
 
-    Between two axial stations w follows the cubic Hermite interpolation of
-    the element in w and w_x, degrees of freedom 6 and 7, as in
-    doc/verification/reference_b_convergence.py. The crest over the
-    circumference of a single harmonic is the envelope of the mode and of
-    its rotated partner, the stiffness of these cylinders being uniform
-    around it, and the mean of w**2 over the ny nodes of an axial station is
-    exact for such a harmonic
+    def __init__(self, out, num_grid=9, num_refine=20):
+        pos = out['nid_pos']
+        c = np.array([[DOF*pos[n] for n in nodes] for nodes in
+                      zip(out['n1s'], out['n2s'], out['n3s'], out['n4s'])])
+        self.idx = (c[:, :, None] + np.arange(DOF)).reshape(len(c), -1)
+        x = out['x']
+        #NOTE lex and ley as assigned by the model, y being the arc length at
+        #     ny stations from 0 to circ - ley
+        self.lex = x[c[:, 1]//DOF] - x[c[:, 0]//DOF]
+        self.ley = out['y'].max()/(out['ny'] - 1)
+        self.elem = BFSCCylinderSanders(4)
+        self.elem.R = self.ley*out['ny']/(2*np.pi)
+        self.elem.ley = self.ley
+        self.num_refine = num_refine
+        g = np.linspace(-1., 1., num_grid)
+        self.grid = [(xi, eta) for xi in g for eta in g]
+        #NOTE 4 Gauss points per direction integrate w**2 exactly, w being
+        #     bicubic in the element
+        tg, wg = np.polynomial.legendre.leggauss(4)
+        self.gauss = [(xi, eta, wi*wj) for xi, wi in zip(tg, wg)
+                      for eta, wj in zip(tg, wg)]
+        self.groups = {}
+        for e, le in enumerate(np.round(self.lex, 12)):
+            self.groups.setdefault(le, []).append(e)
+        self.S_grid = {le: self.Sw_points(le, self.grid) for le in self.groups}
+        self.S_gauss = {le: self.Sw_points(le, [(p, q) for p, q, _ in
+                        self.gauss]) for le in self.groups}
+        U0 = out['koiter']['ui'][0].reshape(-1, DOF)
+        self.nodal = np.sqrt(U0[:, 0]**2 + U0[:, 3]**2 + U0[:, 6]**2).max()
+        self.area = self.lex.sum()*self.ley
+
+    def Sw_points(self, le, points):
+        self.elem.lex = le
+        rows = []
+        for xi, eta in points:
+            self.elem.update_Sw(xi, eta)
+            rows.append(np.atleast_2d(self.elem.Sw)[0].copy())
+        return np.array(rows)
+
+    def crest(self, u):
+        """Largest |w| of u over the surface, over the nodal translation
+
+        The largest |w| at a grid of points of every element, then a local
+        maximization of |w| over (xi, eta) inside the num_refine elements of
+        largest grid values, the crest of a mode falling anywhere inside an
+        element
+        """
+        Q = u[self.idx]
+        cand = []
+        for le, sel in self.groups.items():
+            W = np.abs(Q[sel] @ self.S_grid[le].T)
+            k = np.argmax(W, axis=1)
+            cand += zip(W[np.arange(len(sel)), k], sel, k)
+        cand.sort(reverse=True)
+        best = cand[0][0]
+        for w0, e, kk in cand[:self.num_refine]:
+            #NOTE |w| over its grid value, of order one, the default
+            #     tolerances of L-BFGS-B being absolute
+            q = Q[e]/w0
+            le = self.lex[e]
+
+            def f(p):
+                self.elem.lex = le
+                self.elem.update_Sw(*p)
+                return -abs(np.atleast_2d(self.elem.Sw)[0] @ q)
+
+            r = minimize(f, self.grid[kk], method='L-BFGS-B',
+                         bounds=[(-1., 1.), (-1., 1.)],
+                         options=dict(ftol=1.e-15, gtol=1.e-12))
+            best = max(best, -r.fun*w0)
+        return float(best/self.nodal)
+
+    def rms(self, u):
+        """RMS of w of u over the surface, over the nodal translation"""
+        Q = u[self.idx]
+        wg = np.array([w for _, _, w in self.gauss])
+        int_w2 = 0.
+        for le, sel in self.groups.items():
+            W = Q[sel] @ self.S_gauss[le].T
+            int_w2 += le*self.ley/4*(W**2 @ wg).sum()
+        return float(np.sqrt(int_w2/self.area)/self.nodal)
+
+
+def pair_rotation(out, koiter, distinct):
+    """Rotation of the cylinder acting on the closed set of Koiter modes
+
+    A shift of the circumferential node index by one element, rotated, is an
+    exact symmetry of the mesh, and maps the plane of a distinct mode and of
+    its partner onto itself, a rotation by n*dtheta in an orthonormal basis of
+    the plane, n being the wave number and dtheta = 2 pi/ny. That rotation is
+    extended to any angle theta, so that a combination of the Koiter modes
+    can be followed along the continuous family of its rotations, of which
+    the finite element crest is not constant. Returns rotate(v, t), v a
+    combination of the Koiter modes and t = theta/dtheta, and the relative
+    difference between rotate(v, 1) and the exact shift of a test vector
     """
     nx, ny = out['nx'], out['ny']
     order = mesh_order(out['x'], out['y'], nx, ny)
-    u = out['koiter']['ui'][k]
-    U = u.reshape(-1, DOF)[order]
-    nodal = np.sqrt(U[:, :, 0]**2 + U[:, :, 3]**2 + U[:, :, 6]**2).max()
-    psi = rotated(u, order, DOF)
-    psi -= (psi @ u)/(u @ u)*u
-    fields = [U]
-    #NOTE an axisymmetric mode is its own rotation, and its envelope is |w|
-    if np.linalg.norm(psi) > 1.e-8*np.linalg.norm(u):
-        psi *= np.linalg.norm(u)/np.linalg.norm(psi)
-        fields.append(psi.reshape(-1, DOF)[order])
-    xs = out['x'][order[:, 0]]
-    #NOTE 41 points per element for the crest; for the RMS 4 Gauss points,
-    #     exact for the square of the cubic
-    t = np.linspace(0, 1, 41)[:, None]
-    tg, wg = np.polynomial.legendre.leggauss(4)
-    tg, wg = (tg[:, None] + 1)/2, wg/2
+    ui = koiter['ui']
+    m = len(distinct)
+    planes = []
+    for k in range(m):
+        if not distinct[k] or k + 1 >= m or distinct[k + 1]:
+            continue
+        Qk, _ = np.linalg.qr(np.column_stack([ui[k], ui[k + 1]]))
+        #NOTE the exact shift in the orthonormal basis of the plane
+        M = Qk.T @ np.column_stack([rotated(Qk[:, j], order, DOF)
+                                    for j in range(2)])
+        n = mode_harmonics(out, k)[0]
+        #NOTE the angle of the shift is n*dtheta, and M tells its sense
+        sense = np.sign(M[1, 0]) if abs(M[1, 0]) > 1.e-12 else 1.
+        planes.append((Qk, sense*n*2*np.pi/ny))
 
-    def hermite(F, i, t, dx):
-        H00, H10 = 2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t
-        H01, H11 = -2*t**3 + 3*t**2, t**3 - t**2
-        return (H00*F[i, :, 6] + H10*dx*F[i, :, 7]
-                + H01*F[i + 1, :, 6] + H11*dx*F[i + 1, :, 7])
+    def rotate(v, t):
+        v = v.copy()
+        for Qk, alpha in planes:
+            z = Qk.T @ v
+            c, s = np.cos(alpha*t), np.sin(alpha*t)
+            v += Qk @ (np.array([[c, -s], [s, c]]) @ z - z)
+        return v
 
-    crest = 0.
-    int_w2 = 0.
-    for i in range(nx - 1):
-        dx = xs[i + 1] - xs[i]
-        env2 = sum(hermite(F, i, t, dx)**2 for F in fields)
-        crest = max(crest, np.sqrt(env2).max())
-        int_w2 += dx*(wg @ (hermite(U, i, tg, dx)**2).mean(axis=1))
-    rms = np.sqrt(int_w2/(xs[-1] - xs[0]))
-    return float(crest/nodal), float(rms/nodal)
+    #NOTE on w only: a partner of degenerate_partner carries the axial rigid
+    #     body translation that restores the constraint of a single node
+    test = sum(ui[k]*(k + 1) for k in range(m))
+    exact = rotated(test, order, DOF)[6::DOF]
+    err = (np.linalg.norm(rotate(test, 1.)[6::DOF] - exact)
+           /np.linalg.norm(exact))
+    return rotate, float(err)
+
+
+def orbit_crest(field, rotate, v, num_phases=8):
+    """Largest element crest of v over its rotations by a fraction of an
+    element, the finite element crest of a rotated field depending on where
+    it falls between the nodes"""
+    return max(field.crest(rotate(v, t))
+               for t in np.arange(num_phases)/num_phases)
 
 
 def use_koiter_denominators():
@@ -467,44 +563,6 @@ def use_koiter_denominators():
 
     model.b_coefficients = keep
     return lambda_d
-
-
-def field_crest(out, u, num_points=11):
-    """Largest |w| of the field u, between the nodes as well, over the
-    largest nodal translation of Koiter mode 0
-
-    A combination of modes of different circumferential wave numbers is no
-    longer a single harmonic, whose crest mode_amplitudes finds from the
-    envelope of a pair, so w is followed over every element with the bicubic
-    Hermite interpolation of the element in w, w_x, w_y and w_xy, degrees of
-    freedom 6 to 9, y being the arc length. The largest nodal translation of
-    mode 0 is the thickness, to which the models scale every mode
-    """
-    nx, ny = out['nx'], out['ny']
-    order = mesh_order(out['x'], out['y'], nx, ny)
-    U0 = out['koiter']['ui'][0].reshape(-1, DOF)[order]
-    nodal = np.sqrt(U0[:, :, 0]**2 + U0[:, :, 3]**2 + U0[:, :, 6]**2).max()
-    U = u.reshape(-1, DOF)[order][:, :, 6:10]
-    dx = np.diff(out['x'][order[:, 0]])[:, None]
-    dy = out['y'].max()/(ny - 1)
-    t = np.linspace(0, 1, num_points)
-    H = np.array([2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t,
-                  -2*t**3 + 3*t**2, t**3 - t**2])
-    #NOTE nodes (i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1) of the
-    #     elements, closing the circumference
-    corners = [(U[:-1], 0, 0), (U[1:], 2, 0),
-               (np.roll(U[:-1], -1, axis=1), 0, 2),
-               (np.roll(U[1:], -1, axis=1), 2, 2)]
-    w = 0.
-    for F, a, b in corners:
-        #NOTE w, dx*w_x, dy*w_y and dx*dy*w_xy against Hx*Hy, Gx*Hy, Hx*Gy
-        #     and Gx*Gy
-        w = w + (np.einsum('ij,p,q->ijpq', F[:, :, 0], H[a], H[b])
-                 + np.einsum('ij,p,q->ijpq', dx*F[:, :, 1], H[a + 1], H[b])
-                 + np.einsum('ij,p,q->ijpq', dy*F[:, :, 2], H[a], H[b + 1])
-                 + np.einsum('ij,p,q->ijpq', dx*dy*F[:, :, 3], H[a + 1],
-                             H[b + 1]))
-    return float(np.abs(w).max()/nodal)
 
 
 if __name__ == '__main__':
@@ -571,11 +629,17 @@ if __name__ == '__main__':
             b_iiii=[b_ijkl[i][i][i][i] for i in range(m)],
             )
         #NOTE b_ijkl and a_ijk above are for the nodal normalization of the
-        #     models; post.py rescales them with these, see mode_amplitudes
-        amplitudes = [mode_amplitudes(out, k) for k in range(m)]
+        #     models; post.py rescales them with these, see ElementField
+        #NOTE crest and RMS of w of every Koiter mode from the kinematics of
+        #     the element, see ElementField and koiter_post.py
+        field = ElementField(out)
+        rotate, rotation_error = pair_rotation(out, koiter, num_distinct[1])
         result.update(
-            crest_w=[c for c, _ in amplitudes],
-            rms_w=[r for _, r in amplitudes],
+            #NOTE the largest over the rotations of each mode
+            crest_w=[orbit_crest(field, rotate, koiter['ui'][k])
+                     for k in range(m)],
+            rotation_error=rotation_error,
+            rms_w=[field.rms(koiter['ui'][k]) for k in range(m)],
             lambda_d=lambda_d[0],
             )
         #NOTE the energy normalization of Rahman (2009), its most imperfection
@@ -585,14 +649,17 @@ if __name__ == '__main__':
         b_energy, _ = koiter_post.rescaled(np.array(b_ijkl), np.array(a_ijk), s)
         b_min, e_min = koiter_post.min_direction(b_energy)
         combined = sum(e_min[k]*s[k]*koiter['ui'][k] for k in range(m))
-        crest_e = field_crest(out, combined)
+        #NOTE the minimum direction is defined up to a rotation of the
+        #     cylinder, and the largest crest over the rotations is kept, with
+        #     the smallest as a measure of the discretization
+        crests = [field.crest(rotate(combined, t)) for t in np.arange(8)/8]
+        crest_e = max(crests)
+        result.update(crest_e_min=min(crests))
         result.update(
             b_min_energy=b_min, e_min=[float(v) for v in e_min],
             crest_e=crest_e, b_min_t=b_min/crest_e**2,
-            #NOTE the bicubic crest of every mode, against the envelope one
-            #     of mode_amplitudes, a check of field_crest
-            crest_w_bicubic=[field_crest(out, koiter['ui'][k])
-                             for k in range(m)],
+            #NOTE crest and RMS from ElementField, see generate_qsubs.py
+            crest_method='element_orbit',
             )
         result.update(
             #NOTE param_n and c2_ratio as analyzed, which differ from v2 and

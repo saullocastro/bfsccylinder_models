@@ -57,7 +57,7 @@ for fname in fnames:
         r['b_factor'],
         '/'.join('%.6g' % b for b in r.get('b_iiii', [r['b_factor']])),
         #NOTE b_iiii of the modes with a crest, or an RMS of w, equal to the
-        #     thickness, see mode_amplitudes in run_case.py
+        #     thickness, see ElementField in run_case.py
         '/'.join('%.6g' % (b/c**2) for b, c in
                  zip(r.get('b_iiii', []), r.get('crest_w', []))) or None,
         '/'.join('%.6g' % (b/c**2) for b, c in

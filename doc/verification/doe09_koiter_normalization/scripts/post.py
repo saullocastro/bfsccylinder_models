@@ -46,7 +46,7 @@ def read_result(fname):
     if result is None or 'error' in result:
         return None
     if (result.get('koiter_num_modes') != koiter_num_modes
-            or 'b_min_energy' not in result):
+            or result.get('crest_method') != 'element_orbit'):
         #NOTE a run of an earlier setup, see generate_qsubs.py
         return None
     #NOTE the multiplier of the second distinct Koiter mode, the first

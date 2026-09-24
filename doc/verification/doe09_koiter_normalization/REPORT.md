@@ -12,6 +12,83 @@ The library is unchanged. Every change is in the DOE09 driver, copied in
 `generate_qsubs_convergence.py`. The tables of the three convergence studies
 are in [`tables/`](tables), the diagnostic scripts in [`checks/`](checks).
 
+## Update: element crest and cut degenerate clusters
+
+Two corrections since the first version of this report. Sections 5 to 7
+below are kept as first written, with notes where these corrections apply.
+
+**1. The crest is now computed with the kinematics of the element.**
+`ElementField` in `run_case.py` evaluates w anywhere in an element as
+Sw(xi, eta) @ q, with `update_Sw` of `BFSCCylinderSanders`, the element the
+model is assembled with. The crest is the largest |w| on a 9 x 9 grid of every
+element, refined by L-BFGS-B in (xi, eta) inside the 20 elements of largest
+grid values; the RMS integrates w**2 with 4 x 4 Gauss points per element,
+exact for the bicubic w. Checks, [`checks/crest_methods.py`](checks/crest_methods.py)
+and [`checks/element_crest_reference.py`](checks/element_crest_reference.py):
+
+- the bicubic Hermite reconstruction used before equals the element Sw to
+  3e-16 at random interior points, so it was the right field, sampled at the
+  wrong points;
+- the crest falls inside the elements, e.g. at (xi, eta) = (0.59, -0.24);
+- the refined crest agrees with a 41 x 41 grid refined in 200 elements to
+  1e-15 for every mode (cases 0 LIN and 6 NL, ny = 80); the refinement needed
+  the objective scaled to order one, the modes being in metres;
+- case 0, LIN, ny = 80, crest over the largest nodal translation:
+
+  | mode | edge envelope (old crest_w) | 11 x 11 grid (old crest_e) | element, refined |
+  |---|---|---|---|
+  | 0 | 1.04858 | 1.05277 | 1.05343 |
+  | 1 | 1.03412 | 1.04206 | 1.04240 |
+  | 8 | 1.02918 | 1.03800 | 1.03808 |
+
+  so the old crest_w were 0.5-0.8 % low (1-1.6 % on the crest-normalized
+  b_iiii) and the old crest_e up to 0.4 % low (up to 0.8 % on b_min_t);
+- rms_w from the element is 1.8 % below the old edge-based value, which
+  sampled w on the node columns only.
+
+**2. The crest depends on the rotation of the field against the mesh.** The
+minimum direction of b is defined only up to a rotation of the cylinder, and
+a shift by a fraction of an element is not a symmetry of the mesh, so the
+finite element crest of the combined mode varies along the family:
+10.533 to 10.585 (0.5 %) for case 0, LIN, ny = 80. `pair_rotation` extends
+the exact shift by one element, a rotation by n dtheta in the plane of each
+distinct mode and its partner, to any angle; it reproduces the exact shift
+of w to 8e-9. crest_w of every mode and crest_e are now the largest over 8
+rotations within one element (`crest_e_min` the smallest, as a measure of the
+discretization); e.g. crest_w of mode 0 becomes 1.0572.
+
+**3. The 5th distinct mode cuts a degenerate cluster in 10 of the 24 runs,
+so the invariance of Section 6 does not hold in general.** Repeating the
+check of Section 6 after these changes, the reference slice gave
+b_min_energy = -0.4678 instead of -0.5975, the other slice -0.5975 again;
+the minimization is not at fault (40, 400 and 2000 starts agree). The n = 21
+eigenspace of case 1, NL, ny = 80, is four-dimensional too (multipliers
+7.4e-3 above the critical one, equal to round off), and 5 distinct modes take
+n = 22 (2), n = 23 (2) and **one** of the two n = 21 modes, with its partner:
+half of that eigenspace, the other half left out, chosen by round off. The
+agreement to 7e-6 of Section 6 was the two runs happening to return the same
+half. Over the 24 runs of Section 7, the 5th distinct mode and the next one
+share their multiplier to better than 1e-5 in:
+
+| run | gap to the next distinct mode |
+|---|---|
+| 0 NL ny=120 | 5.3e-6 |
+| 0 NL ny=200 | 2.9e-6 |
+| 1 NL ny=80, 120, 160, 200 | 3.7e-13, 6.0e-15, 1.1e-15, 8.9e-15 |
+| 6 LIN ny=80 | 3.1e-10 |
+| 6 NL ny=120, 160, 200 | 2.5e-10, 1.9e-12, 1.3e-10 |
+
+and to 3-4e-5 in 0 NL ny=160, 6 LIN ny=160 and 200. **The b_min and b_min_t
+of Section 7 for these runs depend on round off.** The fix is a Koiter set
+made of complete clusters: at least 5 distinct modes, extended to the end of
+the cluster of the 5th, with their partners, 12 modes when the clusters are
+four-fold as in the NL cases. That makes the number of Koiter modes vary from
+run to run, and `fkoiter_cylinder_CTS_circum` takes koiter_num_modes before
+its eigenvalue analysis; see [Decision](#9-decision), option 4.
+
+The convergence study has not been rerun with these corrections; its results
+from the first version are kept as `k5c_grid11` in the DOE09 directory.
+
 ## Summary
 
 1. Pcr is converged at ny = 160: within 0.5 % of ny = 200.
@@ -224,7 +301,15 @@ b_min is invariant to 7e-6. b_min_t differs by 1.2 %: the minimum direction
 is defined only up to a rotation of the cylinder, and the crest of the
 rotated field falls differently between the nodes.
 
+**Note (Update, point 3):** this agreement was fortuitous. The 5th distinct
+mode cuts the four-fold n = 21 eigenspace, and a later repetition of the same
+check gave -0.4678 against -0.5975.
+
 ## 7. Convergence with the closed basis and the energy normalization
+
+**Note (Update):** these results use the old crests (points 1 and 2 of the
+Update), and in 10 of the 24 runs the Koiter set cuts a degenerate cluster
+(point 3), so b_min and b_min_t of those runs depend on round off.
 
 [`tables/DOE09_convergence_k5c.txt`](tables/DOE09_convergence_k5c.txt), all
 24 runs finished, no PARDISO fallback to SuperLU, no incomplete nonlinear
@@ -297,10 +382,24 @@ Open, one of:
 
 1. **ny = 240 and 280 for cases 0, 1 and 6, LIN and NL, first** (12 runs, a
    few hours each), to see whether b_min_t settles before committing the DOE.
-   Recommended.
+   Recommended in the first version; superseded by option 4, which has to
+   come first.
 2. **DOE at ny = 160**, 19,100 core-hours, with a mesh uncertainty of about
    5-10 % on b_min_t from this study; Pcr converged.
 3. **DOE at ny = 200**, 28,900 core-hours, not shown to be converged either.
+4. **Complete clusters first** (see the Update at the top), then rerun the
+   convergence study:
+   - (a) in the DOE09 driver: run the model with 10 Koiter modes, and when the
+     final eigenvalue analysis shows that the 5th distinct mode cuts a cluster,
+     run it again with the number of modes that completes it. No library
+     change, but the runs concerned cost twice (10 of the 24 of the study,
+     mostly NLprebuck);
+   - (b) in the library, on this branch: let koiter_num_modes be chosen after
+     the eigenvalue analysis, e.g. a minimum number of distinct modes
+     completed to whole clusters. No rerun, but the DOE then runs on the
+     branch until it is released;
+   - either way, 12 modes instead of 10 for most NL cases: 78 bordered solves
+     instead of 55, and about 1.5 times the Koiter cost of 10 modes.
 
 ## 10. Issues in the library
 
@@ -325,9 +424,14 @@ Reported, not changed; both are worked around in `run_case.py`:
 - `run_case.py`
   - `koiter_num_distinct = 5`, `koiter_rotation_closed = True`,
     `koiter_num_modes = 10`, `use_distinct_modes` as in Section 6;
-  - `mode_amplitudes` (crest_w, rms_w), `use_koiter_denominators`
-    (lambda_d), `field_crest` (bicubic crest), and b_min_energy, e_min,
-    crest_e, b_min_t, koiter_distinct in the RESULT line.
+  - `use_koiter_denominators` (lambda_d), and b_min_energy, e_min, crest_e,
+    b_min_t, koiter_distinct in the RESULT line;
+  - since the Update: `ElementField` (crest and RMS of w from the element
+    kinematics, replacing `mode_amplitudes` and `field_crest`),
+    `pair_rotation` and `orbit_crest` (largest crest over the rotations within
+    one element), crest_e_min, rotation_error, and crest_method =
+    'element_orbit', which `generate_qsubs.py`, `generate_qsubs_convergence.py`
+    and `post.py` require of an output.
 - `koiter_post.py`: `rescaled`, `energy_scales`, `symmetrized`,
   `min_direction`.
 - `post.py`: `DOE09_koiter.npz` with the nodal b_ijkl and a_ijk of the 10
@@ -342,7 +446,8 @@ Reported, not changed; both are worked around in `run_case.py`:
   reruns outputs without b_min_energy.
 
 The scripts in [`checks/`](checks) were run from the DOE09 directory, next to
-`DOE09.txt`, with the `run_case.py` of their stage: `mode_pairs.py`,
+`DOE09.txt`, with the `run_case.py` of their stage: `crest_methods.py` and
+`element_crest_reference.py` with the one of the Update, `mode_pairs.py`,
 `pair_mixing.py` and `same_process_resolve.py` with the 5-mode one, `fourfold_degeneracy.py` and
 `eigenspace_slice.py` with the 10-mode one of [`scripts/`](scripts).
 
