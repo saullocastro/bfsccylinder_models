@@ -541,6 +541,19 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     out['eigvecs'] = eigvecs
     out['koiter'] = None
 
+    #NOTE koiter_num_modes may be a callable of the multipliers and of the
+    #     eigenvectors over every degree of freedom, returning the number of
+    #     Koiter modes, so that the expansion can be made on a set chosen
+    #     from the computed modes, e.g. one that does not cut a group of
+    #     modes of equal multiplier. It is called once, after the last
+    #     eigenvalue analysis
+    if callable(koiter_num_modes):
+        koiter_num_modes = int(koiter_num_modes(mu, eigvecs))
+        if not 0 <= koiter_num_modes <= num_eigvals:
+            raise ValueError('koiter_num_modes returned %d, outside 0 to '
+                    'num_eigvals=%d' % (koiter_num_modes, num_eigvals))
+    out['koiter_num_modes'] = koiter_num_modes
+
     if koiter_num_modes == 0:
         return out
 

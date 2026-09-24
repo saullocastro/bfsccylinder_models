@@ -32,6 +32,16 @@ from scipy.optimize import minimize
 
 import koiter_post
 
+#NOTE koiter_num_modes given as a callable needs bfsccylinder_models of the
+#     branch doe09-koiter-normalization, which the job scripts put first on
+#     PYTHONPATH
+import inspect
+if 'callable(koiter_num_modes)' not in inspect.getsource(
+        model.fkoiter_cylinder_CTS_circum):
+    raise ImportError('bfsccylinder_models at %s does not take koiter_num_modes '
+            'as a callable, use the branch doe09-koiter-normalization'
+            % bfsccylinder_models.__file__)
+
 DOE_name = 'DOE09'
 DOF = 10
 
@@ -44,15 +54,18 @@ ny = 160 #NOTE number of elements around circumference, nxt from choose_nxt
 #NOTE relative residual above which a PARDISO solution is rejected
 max_residual = 1.e-8
 
-#NOTE multi-mode Koiter expansion on koiter_num_distinct modes distinct up to
-#     the rotation of the cylinder, see use_distinct_modes. num_eigvals must
-#     leave room for the rotated partner of each of them. With
-#     koiter_rotation_closed the rotated partner of each distinct mode is
-#     added to the expansion, koiter_num_modes = 2*koiter_num_distinct
+#NOTE multi-mode Koiter expansion on at least koiter_num_distinct modes
+#     distinct up to the rotation of the cylinder, completed to the end of the
+#     group of equal multipliers, to koiter_cluster_rtol, of the last one, and
+#     on the rotated partner of each, see use_distinct_modes, which sets
+#     koiter_num_modes to the callable that returns their number to the model
+#     after its last eigenvalue analysis (bfsccylinder_models, branch
+#     doe09-koiter-normalization). num_eigvals must leave room for the
+#     partners and for the mode that ends the last group
 koiter_num_distinct = 5
-koiter_rotation_closed = True
-koiter_num_modes = (2 if koiter_rotation_closed else 1)*koiter_num_distinct
-num_eigvals = 12
+koiter_cluster_rtol = 1.e-5
+koiter_num_modes = None
+num_eigvals = 16
 
 
 def use_distinct_modes():
@@ -73,9 +86,8 @@ def use_distinct_modes():
     place with them, mu being the array the model keeps using. The number of
     distinct modes of the last eigenvalue analysis is returned in a list.
 
-    With koiter_rotation_closed, every distinct mode is followed by its
-    rotated partner instead, so that the Koiter modes span the rotations of
-    each other. The partners do carry information into a multi-mode
+    Every distinct mode is then followed by its rotated partner, so that the
+    Koiter modes span the rotations of each other. The partners do carry information into a multi-mode
     expansion: the interaction of two distinct modes depends on their
     relative rotation, which canonical_modes fixes by a convention, and when
     the two members of a pair of symmetric and antisymmetric modes, localized
@@ -83,13 +95,28 @@ def use_distinct_modes():
     with NLprebuck, their rotations span a four dimensional eigenspace of
     which the eigen solver returns an arbitrary two dimensional slice. The
     expansion over the closed set is independent of that slice, and of the
-    convention. An axisymmetric mode has no partner and takes one column
+    convention. An axisymmetric mode has no partner and takes one column.
+
+    The same holds for a group of distinct modes of equal multiplier: at
+    least koiter_num_distinct distinct modes are taken, and then every
+    further one whose multiplier equals that of the last taken to
+    koiter_cluster_rtol, the tolerance of canonical_modes, so that no such
+    group is cut. The 5th distinct mode cut a four dimensional eigenspace in
+    10 of the 24 runs of the convergence study, leaving the other half of it
+    out of the expansion as decided by round off. The number of Koiter modes
+    then varies from run to run, and the global koiter_num_modes is set to
+    the callable that returns it to the model after the last eigenvalue
+    analysis, which raises the errors found in selecting the set
     """
     canonical_modes = model.canonical_modes
     num_distinct = [None]
-    #NOTE with koiter_rotation_closed, True for the Koiter modes that are
-    #     distinct modes and False for the partners, a list in num_distinct[1]
-    num_distinct.append(None)
+    #NOTE True for the Koiter modes that are distinct modes and False for the
+    #     partners, in num_distinct[1]; the relative gap between the
+    #     multiplier of the last distinct Koiter mode and that of the next
+    #     distinct mode in num_distinct[2]; the number of Koiter modes, or the
+    #     error found in selecting them, in selection
+    num_distinct += [None, None]
+    selection = {}
     #NOTE KCuu of the last eigenvalue analysis, the metric in which the
     #     closed set of Koiter modes is made orthonormal
     eigsh = model.eigsh
@@ -130,10 +157,22 @@ def use_distinct_modes():
                 vecs.append(psi)
             basis = np.column_stack([basis] + vecs)
         num_distinct[0] = len(distinct)
-        if not koiter_rotation_closed:
-            perm = distinct + twins
-            mu[:] = np.asarray(mu)[perm]
-            return eigvecsu[:, perm]
+        selection.clear()
+        #NOTE the distinct modes of the expansion, complete groups
+        take = distinct[:koiter_num_distinct]
+        for k in distinct[koiter_num_distinct:]:
+            if abs(mu[k] - mu[take[-1]]) > koiter_cluster_rtol*abs(mu[take[-1]]):
+                break
+            take.append(k)
+        if len(take) < koiter_num_distinct or take[-1] == distinct[-1]:
+            #NOTE fewer distinct modes than required, or the last one returned
+            #     is in the set, and the end of its group is not known
+            selection['error'] = ('%d distinct modes among %d eigenvectors do '
+                    'not end a group of at least koiter_num_distinct=%d, raise '
+                    'num_eigvals' % (len(distinct), eigvecsu.shape[1],
+                                     koiter_num_distinct))
+        nxt = distinct[len(take)] if len(distinct) > len(take) else take[-1]
+        num_distinct[2] = float(abs(mu[nxt] - mu[take[-1]])/abs(mu[take[-1]]))
         #NOTE the expansion of the models takes the Koiter modes orthogonal in
         #     the metric of the load term, d_ij = 0 for i != j, which the
         #     eigenvectors are, but a partner built by degenerate_partner is
@@ -144,28 +183,37 @@ def use_distinct_modes():
         #     partner is built from the mode so made, whose rotations are
         #     then orthogonal to the previous columns as well
         cols, mus, used, flags = [], [], [], []
-        for k in distinct:
-            if len(cols) + 1 > koiter_num_modes:
-                break
+        for k in take:
             phi = np.zeros(bu.shape[0])
             phi[bu] = orthonormal(eigvecsu[:, k], cols)
             psi = model.degenerate_partner(phi, bu, axi_order, DOF)
             pair = [phi[bu]]
             if psi is not None:
                 pair.append(orthonormal(psi[bu], cols + pair))
-            if len(cols) + len(pair) > koiter_num_modes:
-                break
             cols += pair
             mus += [mu[k]]*len(pair)
             used.append(k)
             flags += [True] + [False]*(len(pair) - 1)
         num_distinct[1] = flags
+        if len(cols) > eigvecsu.shape[1]:
+            selection.setdefault('error', '%d Koiter modes, more than '
+                    'num_eigvals=%d' % (len(cols), eigvecsu.shape[1]))
+            cols, mus = cols[:eigvecsu.shape[1]], mus[:eigvecsu.shape[1]]
+        selection['num_modes'] = len(cols)
         #NOTE the rest of the columns, not Koiter modes, keep the width
         rest = [k for k in distinct + twins if k not in used]
         rest = rest[:eigvecsu.shape[1] - len(cols)]
         mu[:] = np.array(mus + [mu[k] for k in rest])
         return np.column_stack(cols + [eigvecsu[:, k] for k in rest])
 
+    def num_modes(mu, eigvecs):
+        """Number of Koiter modes of the last eigenvalue analysis"""
+        if 'error' in selection:
+            raise RuntimeError(selection['error'])
+        return selection['num_modes']
+
+    global koiter_num_modes
+    koiter_num_modes = num_modes
     model.canonical_modes = distinct_first
     return num_distinct
 
@@ -603,8 +651,10 @@ if __name__ == '__main__':
     lambda_d = use_koiter_denominators()
     result = dict(case=icase, NLprebuck=NLprebuck, v1=v1, v2=v2, v3=v3, v4=v4,
                   v5=v5, library=bfsccylinder_models.__file__,
-                  solvers=solvers, koiter_num_modes=koiter_num_modes,
-                  koiter_rotation_closed=koiter_rotation_closed,
+                  solvers=solvers, koiter_num_distinct=koiter_num_distinct,
+                  koiter_cluster_rtol=koiter_cluster_rtol,
+                  #NOTE see generate_qsubs.py
+                  koiter_set='complete_clusters',
                   num_eigvals=num_eigvals)
     t0 = time.time()
     try:
@@ -616,7 +666,7 @@ if __name__ == '__main__':
         n0, axi0 = mode_harmonics(out, 0)
         mu = out['mu']
         koiter = out['koiter']
-        m = koiter_num_modes
+        m = out['koiter_num_modes']
         #NOTE b_ijkl[i][j][k][l] and a_ijk[i][j][k], the modes ordered by
         #     increasing multiplier, mode 0 being the critical one
         b_ijkl = [[[[float(koiter['b_ijkl'][(i, j, k, l)]) for l in range(m)]
@@ -625,6 +675,7 @@ if __name__ == '__main__':
                   for j in range(m)] for i in range(m)]
         result.update(
             num_distinct=num_distinct[0], koiter_distinct=num_distinct[1],
+            koiter_num_modes=m, koiter_gap=num_distinct[2],
             b_ijkl=b_ijkl, a_ijk=a_ijk,
             b_iiii=[b_ijkl[i][i][i][i] for i in range(m)],
             )

@@ -3,19 +3,21 @@
 usage: python post_convergence.py [SUFFIX]
 
 SUFFIX selects the study, '' for the single-mode one, '_k5' for the
-five-mode one, '_k5c' (default) for the five distinct modes and their rotated
-partners, and is appended to the name of the table written
+five-mode one, '_k5c' for the five distinct modes and their rotated partners,
+'_k5g' (default) for at least five distinct modes completed to whole groups
+of equal multiplier and their partners, and is appended to the name of the
+table written
 """
 import glob
 import json
 import sys
 
 DOE_name = 'DOE09'
-suffix = sys.argv[1] if len(sys.argv) > 1 else '_k5c'
+suffix = sys.argv[1] if len(sys.argv) > 1 else '_k5g'
 
 columns = ['case', 'NLprebuck', 'ny', 'nx', 'nxt', 'max_ny_nx_aspect_ratio',
            'DOF', 'dx_max_mm', 'Pcr', 'n', 'mu1_ratio', 'modes_n', 'mu_ratios',
-           'b_min_t', 'b_min_energy', 'crest_e',
+           'b_min_t', 'b_min_energy', 'crest_e', 'koiter_num_modes', 'koiter_gap',
            'b_factor', 'b_iiii', 'b_iiii_crest', 'b_iiii_rms', 'crest_w',
            'num_distinct', 'lambda_b', 'converged',
            'time_s', 'peak_mem_gb', 'solvers', 'error']
@@ -54,6 +56,7 @@ for fname in fnames:
         '/'.join(str(n) for n in r['modes_n']),
         '/'.join('%.6f' % m for m in r['mu_ratios']),
         r.get('b_min_t'), r.get('b_min_energy'), r.get('crest_e'),
+        r.get('koiter_num_modes'), r.get('koiter_gap'),
         r['b_factor'],
         '/'.join('%.6g' % b for b in r.get('b_iiii', [r['b_factor']])),
         #NOTE b_iiii of the modes with a crest, or an RMS of w, equal to the

@@ -5,9 +5,10 @@ import numpy as np
 
 DOE = 'DOE09'
 size_of_DOE = np.loadtxt(DOE + '.txt', skiprows=1).shape[0]
-#NOTE as in run_case.py and generate_qsubs.py: 5 distinct modes and their
-#     rotated partners
-koiter_num_modes = 10
+#NOTE as in run_case.py and generate_qsubs.py: at least 5 distinct modes,
+#     completed to whole groups of equal multiplier, and their rotated
+#     partners, a number of Koiter modes that varies from run to run
+koiter_num_distinct = 5
 prebucks = ['LIN', 'NL']
 
 inputs = ['v1', 'v2', 'v3', 'v4', 'v5']
@@ -20,8 +21,8 @@ effective = ['param_n', 'c2_ratio']
 #     b_factor is b_1111 of the critical mode; b_iiii the b_iiii of the
 #     koiter_num_modes distinct modes of run_case.py, joined by '/', whose
 #     full b_ijkl and a_ijk are in the RESULT line of each run
-results = ['mass', 'Pcr', 'b_min_t', 'b_min_energy', 'b_factor', 'b_iiii',
-           'num_distinct', 'lambda_b',
+results = ['mass', 'Pcr', 'b_min_t', 'b_min_energy', 'koiter_num_modes',
+           'b_factor', 'b_iiii', 'num_distinct', 'lambda_b',
            'n', 'axi_share', 'mu1_ratio', 'gap', 'converged', 'solvers']
 columns = (['run ID'] + inputs + effective
            + ['%s_%s' % (r, p) for p in ['LIN', 'NL'] for r in results])
@@ -45,7 +46,8 @@ def read_result(fname):
                 warning = True
     if result is None or 'error' in result:
         return None
-    if (result.get('koiter_num_modes') != koiter_num_modes
+    if (result.get('koiter_set') != 'complete_clusters'
+            or result.get('koiter_num_distinct') != koiter_num_distinct
             or result.get('crest_method') != 'element_orbit'):
         #NOTE a run of an earlier setup, see generate_qsubs.py
         return None
@@ -64,31 +66,25 @@ def read_result(fname):
 
 output = ['# ' + ', '.join(columns) + '\n']
 num_missing = dict(LIN=0, NL=0)
-#NOTE b_ijkl[i, p, j, k, l, m] and a_ijk[i, p, j, k, l] of run i, p indexing
-#     prebucks, for the nodal normalization of the models, the modes ordered
-#     by increasing multiplier, mode 0 being the critical one, see
-#     run_case.py. NaN for a missing or failed run
-m = koiter_num_modes
-b_ijkl = np.full((size_of_DOE, len(prebucks)) + (m,)*4, np.nan)
-a_ijk = np.full((size_of_DOE, len(prebucks)) + (m,)*3, np.nan)
-mu_ratios = np.full((size_of_DOE, len(prebucks), m), np.nan)
-modes_n = np.full((size_of_DOE, len(prebucks), m), -1)
-#NOTE the scales of the other normalizations, see koiter_post.py: b_ijkl
-#     and a_ijk of the modes with a crest or an RMS of w equal to the
-#     thickness, or of the energy normalization of Rahman (2009), are
-#     koiter_post.rescaled(b_ijkl, a_ijk, s) with s = 1/crest_w, 1/rms_w or
-#     koiter_post.energy_scales(lambda_d). Not stored, 1.6 GB each
-crest_w = np.full((size_of_DOE, len(prebucks), m), np.nan)
-rms_w = np.full((size_of_DOE, len(prebucks), m), np.nan)
-lambda_d = np.full((size_of_DOE, len(prebucks), m), np.nan)
-distinct = np.zeros((size_of_DOE, len(prebucks), m), dtype=bool)
-#NOTE b_min of the energy normalization, its direction e_min over the
-#     Koiter modes, and b_min_t of the combined mode scaled to a crest of w
-#     equal to the thickness, see koiter_post.py
-b_min_energy = np.full((size_of_DOE, len(prebucks)), np.nan)
-b_min_t = np.full((size_of_DOE, len(prebucks)), np.nan)
-crest_e = np.full((size_of_DOE, len(prebucks)), np.nan)
-e_min = np.full((size_of_DOE, len(prebucks), m), np.nan)
+#NOTE per run, in DOE09_koiter/<run ID>_<LIN|NL>.npz, over its m Koiter
+#     modes ordered by increasing multiplier, mode 0 the critical one, and
+#     each distinct mode followed by its rotated partner (distinct):
+#     b_ijkl (m, m, m, m) and a_ijk (m, m, m) for the nodal normalization of
+#     the models, and the scales of the other normalizations, see
+#     koiter_post.py: b_ijkl and a_ijk of the modes with a crest or an RMS of
+#     w equal to the thickness, or of the energy normalization of Rahman
+#     (2009), are koiter_post.rescaled(b_ijkl, a_ijk, s) with s = 1/crest_w,
+#     1/rms_w or koiter_post.energy_scales(lambda_d); e_min the minimum
+#     direction of the energy normalization. In DOE09_koiter.npz, for every
+#     run, its number of Koiter modes and b_min_energy, b_min_t and crest_e,
+#     NaN for a missing or failed run
+os.makedirs(DOE + '_koiter', exist_ok=True)
+shape = (size_of_DOE, len(prebucks))
+koiter_num_modes = np.zeros(shape, dtype=int)
+koiter_gap = np.full(shape, np.nan)
+b_min_energy = np.full(shape, np.nan)
+b_min_t = np.full(shape, np.nan)
+crest_e = np.full(shape, np.nan)
 for i in range(size_of_DOE):
     runs = {}
     for p, prebuck in enumerate(prebucks):
@@ -96,18 +92,19 @@ for i in range(size_of_DOE):
         if r is None:
             num_missing[prebuck] += 1
             continue
-        b_ijkl[i, p] = r['b_ijkl']
-        a_ijk[i, p] = r['a_ijk']
-        mu_ratios[i, p] = r['mu_ratios'][:m]
-        modes_n[i, p] = r['modes_n'][:m]
-        crest_w[i, p] = r['crest_w']
-        rms_w[i, p] = r['rms_w']
-        lambda_d[i, p] = r['lambda_d']
-        distinct[i, p] = r['koiter_distinct']
+        m = r['koiter_num_modes']
+        koiter_num_modes[i, p] = m
+        koiter_gap[i, p] = r['koiter_gap']
         b_min_energy[i, p] = r['b_min_energy']
         b_min_t[i, p] = r['b_min_t']
         crest_e[i, p] = r['crest_e']
-        e_min[i, p] = r['e_min']
+        np.savez_compressed(os.path.join(DOE + '_koiter',
+                '%s_%05d_%s.npz' % (DOE, i, prebuck)),
+                b_ijkl=np.array(r['b_ijkl']), a_ijk=np.array(r['a_ijk']),
+                crest_w=r['crest_w'], rms_w=r['rms_w'],
+                lambda_d=r['lambda_d'], distinct=r['koiter_distinct'],
+                e_min=r['e_min'], mu_ratios=r['mu_ratios'][:m],
+                modes_n=r['modes_n'][:m])
     first = runs['LIN'] or runs['NL']
     row = ['%s_%05d' % (DOE, i)]
     row += [str(first[k]) if first else 'None' for k in inputs + effective]
@@ -119,9 +116,7 @@ for i in range(size_of_DOE):
 print('# missing or failed runs', num_missing)
 with open(DOE + '_output.txt', 'w') as f:
     f.writelines(output)
-#NOTE 10,000 b_ijkl per run, too many for the columns of the table above
 np.savez_compressed(DOE + '_koiter.npz', run_id=['%s_%05d' % (DOE, i)
-        for i in range(size_of_DOE)], prebuck=prebucks, b_ijkl=b_ijkl,
-        a_ijk=a_ijk, crest_w=crest_w, rms_w=rms_w, lambda_d=lambda_d,
-        distinct=distinct, b_min_energy=b_min_energy, b_min_t=b_min_t,
-        crest_e=crest_e, e_min=e_min, mu_ratios=mu_ratios, modes_n=modes_n)
+        for i in range(size_of_DOE)], prebuck=prebucks,
+        koiter_num_modes=koiter_num_modes, koiter_gap=koiter_gap,
+        b_min_energy=b_min_energy, b_min_t=b_min_t, crest_e=crest_e)

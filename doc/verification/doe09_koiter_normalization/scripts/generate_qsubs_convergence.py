@@ -30,7 +30,7 @@ mem_gb = {80: 4, 120: 8, 160: 16, 200: 24}
 #     took 0.7 s per element on a workstation, 7.4 h for the same run
 walltime_hours = 12
 #NOTE part of the output names, so that the single-mode study is kept
-koiter_suffix = '_k5c'
+koiter_suffix = '_k5g'
 
 
 def done(outname):
@@ -43,8 +43,9 @@ def done(outname):
                 #NOTE crest and RMS of w from the element, see ElementField in
                 #     run_case.py
                 result = json.loads(line[len('RESULT '):])
-                return (result.get('crest_method') == 'element_orbit'
-                        or 'error' in result)
+                return (result.get('koiter_set') == 'complete_clusters'
+                        and (result.get('crest_method') == 'element_orbit'
+                             or 'error' in result))
     return False
 
 
@@ -64,6 +65,9 @@ cd $PBS_O_WORKDIR
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+#NOTE bfsccylinder_models of the branch doe09-koiter-normalization, see
+#     run_case.py
+export PYTHONPATH=/home/saullogiovanip/bfsccylinder_models
 {python} -u run_case.py {icase} {prebuck} {ny} > {outname} 2>&1
 """.format(mem=mem_gb[ny], walltime=walltime_hours, python=python,
            icase=icase, prebuck=prebuck, ny=ny, outname=outname)

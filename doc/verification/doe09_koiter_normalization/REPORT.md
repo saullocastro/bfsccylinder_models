@@ -12,6 +12,115 @@ The library is unchanged. Every change is in the DOE09 driver, copied in
 `generate_qsubs_convergence.py`. The tables of the three convergence studies
 are in [`tables/`](tables), the diagnostic scripts in [`checks/`](checks).
 
+## Current results: complete clusters (study `_k5g`)
+
+Latest setup, option 4 (b) of the [Decision](#9-decision):
+
+- **library** (this branch): `koiter_num_modes` of the four models may be a
+  callable of the multipliers and eigenvectors, called once after the last
+  eigenvalue analysis and returning the number of Koiter modes, recorded in
+  `out['koiter_num_modes']`. New test
+  [`tests/test_koiter_num_modes_callable.py`](../../../tests/test_koiter_num_modes_callable.py):
+  a callable gives the same b_ijkl as the number it returns, CTS and constant
+  stiffness models, LIN and NL, and 0 or too many modes are handled. The whole
+  test suite passes on the branch, 37 tests, PARDISO blocked;
+- **driver**: at least 5 distinct modes, then every further distinct mode
+  whose multiplier equals that of the last taken to 1e-5 (`koiter_cluster_rtol`,
+  the tolerance of `canonical_modes`), each followed by its rotated partner,
+  K_C-orthonormal, energy normalization, minimum direction of Salerno, and
+  `b_min_t` with the element crest over the rotations within one element
+  (see the Update below). num_eigvals = 16. `koiter_gap` in the RESULT line
+  is the relative gap to the first distinct mode left out. The jobs run the
+  library of this branch (`PYTHONPATH`), and `run_case.py` stops if the
+  library does not take a callable.
+
+**Invariance** ([`checks/eigenspace_slice.py`](checks/eigenspace_slice.py),
+case 1, NL, ny = 80, the 12 Koiter modes n = 22, 23 and 21, four of each):
+
+| | original slice | other slice |
+|---|---|---|
+| b_min_energy | -0.600351 | -0.600336 |
+| b_min_t | -0.21678 | -0.21683 |
+| crest_e (smallest over the rotations) | 1.66415 (1.61627) | 1.66396 (1.61481) |
+
+against -0.4678 and -0.5975 for the same check with the n = 21 group cut.
+
+**Convergence**, [`tables/DOE09_convergence_k5g.txt`](tables/DOE09_convergence_k5g.txt),
+24 runs, no failure, no fallback to SuperLU, no incomplete pre-buckling
+iteration. m is the number of Koiter modes, gap the relative gap in
+multiplier to the first distinct mode left out.
+
+| case | ny | b_min_t | b_min_energy | crest_e | m | gap |
+|---|---|---|---|---|---|---|
+| 0 LIN | 80 | -0.07182 | -8.054 | 10.590 | 10 | 3.0e-4 |
+| | 120 | 0.12649 | 0.267 | 1.452 | 10 | 7.7e-4 |
+| | 160 | 0.12337 | 0.289 | 1.530 | 10 | 8.3e-4 |
+| | 200 | 0.12936 | 0.316 | 1.563 | 10 | 1.3e-3 |
+| 0 NL | 80 | -0.12523 | -19.297 | 12.413 | 10 | 1.9e-4 |
+| | 120 | -0.14419 | -23.145 | 12.670 | 12 | 5.1e-4 |
+| | 160 | -0.15668 | -19.859 | 11.258 | **10** | **2.7e-5** |
+| | 200 | -0.17366 | -26.232 | 12.290 | 12 | 1.4e-3 |
+| 1 LIN | 80 | -3.60439 | -4.698 | 1.142 | 9 | 2.0e-3 |
+| | 120 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
+| | 160 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
+| | 200 | 0.03722 | 0.008 | 0.473 | 10 | 3.8e-3 |
+| 1 NL | 80 | -0.21629 | -0.600 | 1.666 | 12 | 1.5e-4 |
+| | 120 | -0.17662 | -0.596 | 1.836 | 12 | 4.4e-3 |
+| | 160 | -0.18859 | -0.631 | 1.830 | 12 | 5.7e-3 |
+| | 200 | -0.19150 | -0.641 | 1.829 | 12 | 5.2e-3 |
+| 6 LIN | 80 | -2.62314 | -120.150 | 6.768 | 12 | 7.1e-3 |
+| | 120 | -0.03712 | -0.592 | 3.994 | 10 | 6.0e-5 |
+| | 160 | -0.04851 | -0.803 | 4.067 | 10 | 3.0e-5 |
+| | 200 | -0.05317 | -0.860 | 4.023 | 10 | 4.1e-5 |
+| 6 NL | 80 | -0.42118 | -29.054 | 8.306 | 10 | 2.1e-4 |
+| | 120 | -0.18102 | -7.570 | 6.467 | 12 | 1.7e-3 |
+| | 160 | -0.22709 | -8.990 | 6.292 | 12 | 5.0e-3 |
+| | 200 | -0.23225 | -9.203 | 6.295 | 12 | 3.9e-3 |
+
+b_min_t from ny = 120, 160 and 200:
+
+| case | 160 to 200 | Richardson | error at 160 | error at 200 |
+|---|---|---|---|---|
+| 0 LIN | 4.9 % | not monotone: 0.1265, 0.1234, 0.1294 | | |
+| 0 NL | 10.8 % | not monotone (step ratio 1.36) | | |
+| 1 LIN | 0 | constant, 0.03722 | 0 | 0 |
+| 1 NL | 1.5 % | order 4.4, -0.1932 | 2.4 % | 0.9 % |
+| 6 LIN | 9.6 % | order 2.5, -0.0595 | 18.5 % | 10.6 % |
+| 6 NL | 2.3 % | order 7.3, -0.2335 | 2.7 % | 0.5 % |
+
+Observations:
+
+- ny = 80 is unusable, as before.
+- **Cases 1 NL and 6 NL are converged at ny = 160 to about 2.5 %**, and to
+  1 % at ny = 200; with the clusters cut (Section 7) they were not
+  reproducible. Case 1 LIN, governed by an axisymmetric mode, is mesh
+  independent.
+- **Case 0 NL is not, and the reason is the Koiter set, not the mesh**: at
+  ny = 160 the 5th distinct mode and the next one are 2.7e-5 apart, above the
+  1e-5 of `koiter_cluster_rtol`, so the set stops at 10 modes, while at
+  ny = 120 and 200 their split falls below 1e-5 and the set has 12. The
+  symmetric/antisymmetric splitting of the end-localized modes is of that
+  order and varies with the mesh, so a set defined by an equality of
+  multipliers changes from mesh to mesh near the tolerance. A near-degenerate
+  pair split by 2.7e-5 is also only resolved by the eigen solver to about
+  tol/gap = 1e-6/2.7e-5.
+- Case 6 LIN converges slowly (order 2.5), with gaps of 3-6e-5 at every mesh,
+  a dense cluster; b_min_t is small, -0.05.
+- Case 0 LIN oscillates within 5 % about 0.126, a positive b.
+- The rotation of the pairs reproduces the shift by one element to 2e-4 at
+  worst (0 LIN, ny = 80) and to 1e-5 or better from ny = 120.
+
+**Cost.** 12 Koiter modes in 10 of the 24 runs; for those, 20 ms more per
+element than with 10 (median, 9.6 to 38.7 ms), so 67 ms per element, about
+55 ms on average, 60 ms in `generate_qsubs.py`:
+
+| ny | core-hours (60 ms) | core-hours (67 ms) | jobs |
+|---|---|---|---|
+| 160 | 20,600 | 21,300 | 432 |
+| 200 | 31,000 | 32,200 | 1,133 |
+
+Peak memory 14.1 GB (case 0, NL, ny = 200, 70 min).
+
 ## Update: element crest and cut degenerate clusters
 
 Two corrections since the first version of this report. Sections 5 to 7
@@ -86,10 +195,15 @@ four-fold as in the NL cases. That makes the number of Koiter modes vary from
 run to run, and `fkoiter_cylinder_CTS_circum` takes koiter_num_modes before
 its eigenvalue analysis; see [Decision](#9-decision), option 4.
 
-The convergence study has not been rerun with these corrections; its results
-from the first version are kept as `k5c_grid11` in the DOE09 directory.
+The convergence study was rerun with these corrections and the groups
+completed, see [Current results](#current-results-complete-clusters-study-_k5g);
+the outputs of Section 7 are kept as `k5c_grid11` in the DOE09 directory.
 
 ## Summary
+
+**See [Current results](#current-results-complete-clusters-study-_k5g)
+for the latest setup and convergence study; the summary below is of the
+first version.**
 
 1. Pcr is converged at ny = 160: within 0.5 % of ny = 200.
 2. The single-mode b and the multi-mode b_iiii of the models do not converge,
@@ -388,7 +502,7 @@ Open, one of:
    5-10 % on b_min_t from this study; Pcr converged.
 3. **DOE at ny = 200**, 28,900 core-hours, not shown to be converged either.
 4. **Complete clusters first** (see the Update at the top), then rerun the
-   convergence study:
+   convergence study. **Done, (b)**, see Current results at the top:
    - (a) in the DOE09 driver: run the model with 10 Koiter modes, and when the
      final eigenvalue analysis shows that the 5th distinct mode cuts a cluster,
      run it again with the number of modes that completes it. No library
@@ -400,6 +514,20 @@ Open, one of:
      branch until it is released;
    - either way, 12 modes instead of 10 for most NL cases: 78 bordered solves
      instead of 55, and about 1.5 times the Koiter cost of 10 modes.
+
+Open after the `_k5g` study:
+
+5. **Group near-degenerate modes as well**: raise `koiter_cluster_rtol` from
+   1e-5 to about 1e-4, above the symmetric/antisymmetric splittings seen
+   (2.7e-5 to 6e-5 in 0 NL and 6 LIN), so that the set does not change from
+   mesh to mesh; check first, on the 24 runs, how many modes that takes, the
+   dense cluster of 6 LIN possibly chaining beyond num_eigvals. Recommended
+   before the DOE, as it is what keeps case 0 NL from converging.
+6. **DOE at ny = 160 with the present set**, 20,600 core-hours: b_min_t
+   within about 2.5 % for 1 NL and 6 NL, 5 % for 0 LIN, 10-20 % for 0 NL and
+   6 LIN, and Pcr within 0.5 %.
+7. **DOE at ny = 200**, 31,000 core-hours: within 1 % for 1 NL and 6 NL,
+   but 0 NL and 6 LIN still not shown to be converged.
 
 ## 10. Issues in the library
 

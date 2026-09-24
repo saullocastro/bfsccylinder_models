@@ -6,13 +6,13 @@ import numpy as np
 
 import run_case
 
-#NOTE multi-mode Koiter analysis of koiter_cylinder_CTS_sanders on 5 distinct
-#     modes and their rotated partners, with the full b_ijkl and a_ijk of the
-#     koiter_num_modes modes in the RESULT line of each run, read by post.py
-koiter_num_modes = 10
-assert (run_case.koiter_num_modes == koiter_num_modes
-        and run_case.koiter_rotation_closed), \
-        'set koiter_num_distinct = 5 and koiter_rotation_closed in run_case.py'
+#NOTE multi-mode Koiter analysis of koiter_cylinder_CTS_sanders on at least 5
+#     distinct modes, completed to whole groups of equal multiplier, and their
+#     rotated partners, with the full b_ijkl and a_ijk of the Koiter modes in
+#     the RESULT line of each run, read by post.py
+koiter_num_distinct = 5
+assert run_case.koiter_num_distinct == koiter_num_distinct, \
+        'set koiter_num_distinct = %d in run_case.py' % koiter_num_distinct
 
 DOE_name = 'DOE09'
 python = '/home/saullogiovanip/miniconda3/bin/python3'
@@ -39,7 +39,11 @@ mem_base = 0.5 # GB
 #     median over the 24 runs of the convergence study with both
 #     (DOE09_convergence_k5c.txt against k5_crest/), from 23 to 38 ms, so
 #     16.8 + 30 ms in all
-koiter_time_per_element = 0.047 if koiter_num_modes > 1 else 0. # s
+#     With the groups completed, 12 modes in 10 of the 24 runs of the
+#     convergence study (DOE09_convergence_k5g.txt), 20 ms more per element
+#     for them, the median of those 10 runs against the same runs with 10
+#     modes (9.6 to 38.7 ms), so about 55 ms on average, 60 ms here
+koiter_time_per_element = 0.060 # s
 
 #NOTE one node per job, the runs executed side by side in it, one core each.
 #     num_parallel is set per job from the largest run it contains
@@ -55,8 +59,8 @@ def done(outname):
     koiter_num_modes modes
 
     An output of an earlier setup, single-mode, with 5 modes not closed
-    under the rotation, or without the normalizations of koiter_post.py, is
-    run again
+    under the rotation, with a group of equal multipliers cut, or without the
+    normalizations of koiter_post.py, is run again
     """
     if not os.path.isfile(outname):
         return False
@@ -64,11 +68,13 @@ def done(outname):
         for line in f:
             if line.startswith('RESULT '):
                 result = json.loads(line[len('RESULT '):])
-                #NOTE crest and RMS of w from the element, see ElementField in
-                #     run_case.py
-                return (result.get('koiter_num_modes') == koiter_num_modes
-                        and (result.get('crest_method') == 'element_orbit'
-                             or 'error' in result))
+                #NOTE koiter_set and crest_method of the present run_case.py
+                if 'error' in result:
+                    return result.get('koiter_set') == 'complete_clusters'
+                return (result.get('koiter_set') == 'complete_clusters'
+                        and result.get('koiter_num_distinct')
+                            == koiter_num_distinct
+                        and result.get('crest_method') == 'element_orbit')
     return False
 
 
@@ -129,6 +135,9 @@ cd $PBS_O_WORKDIR
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+#NOTE bfsccylinder_models of the branch doe09-koiter-normalization, see
+#     run_case.py
+export PYTHONPATH=/home/saullogiovanip/bfsccylinder_models
 xargs -P {num_parallel} -I CMD sh -c 'CMD' < {tasks_name}
 """.format(ppn=ppn, mem=mem_node_gb, walltime=walltime_hours,
            num_parallel=num_parallel, tasks_name=tasks_name)
