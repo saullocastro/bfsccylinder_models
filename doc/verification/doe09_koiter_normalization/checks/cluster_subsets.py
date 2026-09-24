@@ -16,11 +16,13 @@ antisymmetric modes and their rotated partners. For every run are printed
 Unlike the b_iiii of a single mode, the b_min of a whole cluster does not
 depend on the slice of a degenerate eigenspace returned by the eigen solver,
 and is followed across meshes as a measure of the discretization error;
-see the Richardson estimate at the end.
+see the Richardson estimate at the end, from the three meshes NYS, default
+120, 160 and 200. clusters, complete, energy_b, cluster_b and richardson are
+used by reassessment_post.py as well.
 
 usage, from doc/verification/doe09_koiter_normalization:
 
-    python checks/cluster_subsets.py [results/DOE09_conv_k5g.jsonl.gz]
+    python checks/cluster_subsets.py [results/DOE09_conv_k5g.jsonl.gz ...] [--nys 160,200,240]
 """
 import gzip
 import itertools
@@ -40,10 +42,29 @@ circ = 2*np.pi*0.4
 
 
 def clusters(r):
+    """Koiter modes of every wave number, in the order of the Koiter set,
+    the first two distinct modes of each and their partners only
+
+    #NOTE a further distinct mode of the same n, another axial shape, enters
+    #     the set of some meshes only (case 6 NL at thickness factor 2, a
+    #     third pair of n = 22 at ny = 112 and not at 140), and would make
+    #     the cluster of n a different quantity from mesh to mesh; as
+    #     run_case.cluster_subsets
+    """
     groups = {}
+    seen = {}
     for k, n in enumerate(r['modes_n'][:r['koiter_num_modes']]):
-        groups.setdefault(n, []).append(k)
+        seen[n] = seen.get(n, 0) + r['koiter_distinct'][k]
+        if seen[n] <= 2:
+            groups.setdefault(n, []).append(k)
     return groups
+
+
+def complete(r, idx):
+    """True if both distinct modes of a wave number, the symmetric and the
+    antisymmetric one, are among the modes idx, as in
+    run_case.cluster_subsets"""
+    return sum(r['koiter_distinct'][k] for k in idx) >= 2
 
 
 def energy_b(r):
@@ -56,9 +77,39 @@ def subset_b(be, idx):
     return kp.min_direction(be[np.ix_(idx, idx, idx, idx)], num_starts=20)[0]
 
 
-def main(path):
-    runs = [json.loads(l)['result'] for l in gzip.open(path, 'rt')]
-    runs = [r for r in runs if r and 'error' not in r]
+def cluster_b(r, be=None):
+    """b_min_energy of every complete cluster of a run, {n: b}"""
+    be = energy_b(r) if be is None else be
+    return {n: subset_b(be, idx) for n, idx in clusters(r).items()
+            if complete(r, idx)}
+
+
+def richardson(nys, f):
+    """Order p and extrapolated value of f at the three meshes nys, f = f_inf
+    + C/ny**p, or None if f is not monotone"""
+    h = 1/np.asarray(nys, dtype=float)
+    f = np.asarray(f, dtype=float)
+    if f[2] == f[1] or (f[1] - f[0])*(f[2] - f[1]) <= 0:
+        return None
+    R = (f[1] - f[0])/(f[2] - f[1])
+    g = lambda p: (h[0]**p - h[1]**p)/(h[1]**p - h[2]**p) - R
+    try:
+        p = brentq(g, 0.05, 30)
+    except ValueError:
+        return None
+    C = (f[1] - f[2])/(h[1]**p - h[2]**p)
+    return p, f[2] - C*h[2]**p
+
+
+def main(paths, nys=(120, 160, 200)):
+    #NOTE the runs of the present setup only, those of the reassessment
+    #     studies with other options being in reassessment_post.py
+    runs = [json.loads(l)['result'] for path in paths
+            for l in gzip.open(path, 'rt')]
+    runs = [r for r in runs if r and 'error' not in r
+            and r.get('koiter_num_distinct') == 5
+            and r.get('axial_factor', 1.) == 1.
+            and r.get('NLprebuck_eps1', 0.005) == 0.005]
     runs.sort(key=lambda r: (r['case'], not r['NLprebuck'], r['ny']))
     per_cluster = {}
     for r in runs:
@@ -80,7 +131,7 @@ def main(path):
                 idx = sum((groups[n] for n in c), [])
                 bmin = subset_b(be, idx)
                 row.append('%s: %.4g' % ('+'.join(map(str, c)), bmin))
-                if size == 1 and len(groups[c[0]]) == 4:
+                if size == 1 and complete(r, groups[c[0]]):
                     per_cluster.setdefault((r['case'], pre, c[0]), {})[
                             r['ny']] = bmin
             print('    b_min over %d cluster(s): %s' % (size, ', '.join(row)))
@@ -92,29 +143,29 @@ def main(path):
               '|b_ijkl|**2' % (100*three/(bs**2).sum()))
 
     print()
-    print('b_min of single complete clusters (4 modes), Richardson from '
-          'ny = 120, 160 and 200')
+    print('b_min of single complete clusters, Richardson from ny = %s'
+          % ', '.join(map(str, nys)))
     for (case, pre, n), vals in sorted(per_cluster.items()):
-        if not all(ny in vals for ny in (120, 160, 200)):
+        if not all(ny in vals for ny in nys):
             continue
-        h = 1/np.array([120., 160., 200.])
-        f = np.array([vals[120], vals[160], vals[200]])
+        f = [vals[ny] for ny in nys]
         line = 'case %d %s n=%d: %s' % (case, pre, n, ', '.join('%.4g' % v
                                                               for v in f))
-        R = (f[1] - f[0])/(f[2] - f[1]) if f[2] != f[1] else np.inf
-        g = lambda p: (h[0]**p - h[1]**p)/(h[1]**p - h[2]**p) - R
-        try:
-            p = brentq(g, 0.05, 30)
-        except ValueError:
+        fit = richardson(nys, f)
+        if fit is None:
             print(line + ', not monotone')
             continue
-        C = (f[1] - f[2])/(h[1]**p - h[2]**p)
-        finf = f[2] - C*h[2]**p
-        print(line + ', order %.1f, extrapolated %.4g, error %.1f %% at 160 '
-              'and %.1f %% at 200' % (p, finf, 100*(f[1] - finf)/finf,
-                                      100*(f[2] - finf)/finf))
+        p, finf = fit
+        print(line + ', order %.1f, extrapolated %.4g, error %.1f %% at %d '
+              'and %.1f %% at %d' % (p, finf, 100*(f[1] - finf)/finf, nys[1],
+                                     100*(f[2] - finf)/finf, nys[2]))
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else
-         os.path.join('results', 'DOE09_conv_k5g.jsonl.gz'))
+    args = sys.argv[1:]
+    nys = (120, 160, 200)
+    if '--nys' in args:
+        i = args.index('--nys')
+        nys = tuple(int(v) for v in args[i + 1].split(','))
+        del args[i:i + 2]
+    main(args or [os.path.join('results', 'DOE09_conv_k5g.jsonl.gz')], nys)

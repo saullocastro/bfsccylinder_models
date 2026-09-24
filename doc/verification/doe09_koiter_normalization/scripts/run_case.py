@@ -1,10 +1,19 @@
 """Runs one case of DOE09.txt with a linear (LIN) or a nonlinear (NL)
 pre-buckling state
 
-usage: python run_case.py ICASE LIN|NL [NY]
+usage: python run_case.py ICASE LIN|NL [NY] [--distinct K] [--num-eigvals N]
+                         [--axial-factor F] [--eps1 E] [--nint P]
+                         [--kinematics sanders|donnell] [--thickness-factor T]
+                         [--nxxunit N] [--edges SS3|SS4]
 
-NY overrides ny below, for the convergence study. The last line printed is
-"RESULT {json}", read by post.py and post_convergence.py
+NY overrides ny below, for the convergence study. The options, for the
+reassessment studies (generate_qsubs_reassess.py), override
+koiter_num_distinct, num_eigvals, axial_factor, NLprebuck_eps1, nint,
+kinematics, thickness_factor, Nxxunit and edges below, and
+only when this file runs as a script, so that the globals seen by
+generate_qsubs.py are those of the DOE. The last line printed is
+"RESULT {json}", read by post.py, post_convergence.py and
+checks/reassessment_post.py
 """
 import os
 import sys
@@ -41,6 +50,11 @@ if 'callable(koiter_num_modes)' not in inspect.getsource(
     raise ImportError('bfsccylinder_models at %s does not take koiter_num_modes '
             'as a callable, use the branch doe09-koiter-normalization'
             % bfsccylinder_models.__file__)
+if 'edges' not in inspect.signature(
+        model.fkoiter_cylinder_CTS_circum).parameters:
+    raise ImportError('bfsccylinder_models at %s fixes v and w at the edge '
+            'nodes only, or has no SS4 edges, use the branch '
+            'doe09-koiter-normalization' % bfsccylinder_models.__file__)
 
 DOE_name = 'DOE09'
 DOF = 10
@@ -66,6 +80,58 @@ koiter_num_distinct = 5
 koiter_cluster_rtol = 1.e-5
 koiter_num_modes = None
 num_eigvals = 16
+
+#NOTE the largest axial element length is dy/axial_factor, see choose_nxt;
+#     1 is the mesh of the convergence studies
+axial_factor = 1.
+#NOTE tolerance of the iterative eigenvalue algorithm of the model on
+#     lambda_b/lambda_c, the expansion point of NLprebuck, its default
+NLprebuck_eps1 = 0.005
+#NOTE Gauss-Legendre points per direction of every element, for the
+#     stiffness, the laminate and the Koiter tensors alike, the default of
+#     fkoiter_cylinder_CTS_circum; 4 integrates degree 7 exactly, less than
+#     the degree of the products of four derivatives of w in phi4
+nint = 4
+#NOTE shell kinematics of the model, sanders (koiter_cylinder_CTS_sanders)
+#     or donnell (koiter_cylinder_CTS); the two modules differ only in the
+#     element and in the rotation G2 = w,y - v/R of the nonlinear strains,
+#     the membrane strains, v,y + w/R, being the same
+kinematics = 'sanders'
+#NOTE factor on tow_thick, which changes R/h of a design and nothing else of
+#     it, to measure how the mesh error of b depends on R/h
+thickness_factor = 1.
+#NOTE load unit in N/m, the load of lambda = 1, where the load stepping of
+#     the nonlinear pre-buckling state starts; below it, Pcr/(2 pi R) less
+#     than Nxxunit, the first step already overshoots the bifurcation and the
+#     expansion point stays at lambda_b = 1 > lambda_c (thickness factor
+#     0.7 of case 6, Pcr about 2470 N against 2513 N)
+Nxxunit = 1000.
+#NOTE simply supported edges with v = w = 0 along the whole edge, v,y and
+#     w,y fixed at the edge nodes together with v and w, the only condition
+#     of the models of the branch doe09-koiter-normalization, see the check
+#     below; the runs before it fixed v and w at the edge nodes only, and
+#     their RESULT lines have no ss_edge_tangential
+ss_edge_tangential = True
+#NOTE edge condition of the model, see bfsccylinder_models/edges.py: SS3, u
+#     free, or SS4, u uniform along each edge, zero at x = 0 and one shared
+#     unknown at x = L, under the same axial load
+edges = 'SS3'
+#NOTE k and ncv of every call to eigsh, and the ARPACK error of a call
+#     retried with a larger ncv, see use_safe_solvers
+eigsh_calls = []
+
+
+def eigsh_ncv(k, n):
+    """Number of Lanczos vectors of eigsh for k eigenvalues of order n
+
+    None, the default of scipy, min(n, max(2k + 1, 20)), for the
+    num_eigvals=16 of the convergence studies, which it reproduces. With it
+    ARPACK stopped with error -8 at k=20 on DOE09 meshes, so a larger k gets
+    k + 32 at least
+    """
+    if k <= 16:
+        return None
+    return min(n, max(2*k + 1, k + 32))
 
 
 def use_distinct_modes():
@@ -135,15 +201,16 @@ def use_distinct_modes():
             v = v - (c @ (M @ v))*c
         return v/np.sqrt(v @ (M @ v))
 
-    def distinct_first(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
-        eigvecsu = canonical_modes(mu, eigvecsu, bu, axi_order, DOF,
+    def distinct_first(mu, eigvecsu, space, axi_order, DOF, deg_rtol=1.e-5):
+        #NOTE space is the EdgeSpace of the model, u = T a
+        eigvecsu = canonical_modes(mu, eigvecsu, space, axi_order, DOF,
                 deg_rtol=deg_rtol)
+        bu = space.free
         basis = np.zeros((bu.shape[0], 0))
         distinct = []
         twins = []
         for k in range(eigvecsu.shape[1]):
-            phi = np.zeros(bu.shape[0])
-            phi[bu] = eigvecsu[:, k]
+            phi = space.expand(eigvecsu[:, k])
             if basis.shape[1] > 0:
                 coef = np.linalg.lstsq(basis, phi, rcond=None)[0]
                 if (np.linalg.norm(phi - basis @ coef)
@@ -184,12 +251,11 @@ def use_distinct_modes():
         #     then orthogonal to the previous columns as well
         cols, mus, used, flags = [], [], [], []
         for k in take:
-            phi = np.zeros(bu.shape[0])
-            phi[bu] = orthonormal(eigvecsu[:, k], cols)
+            phi = space.expand(orthonormal(eigvecsu[:, k], cols))
             psi = model.degenerate_partner(phi, bu, axi_order, DOF)
-            pair = [phi[bu]]
+            pair = [space.restrict(phi)]
             if psi is not None:
-                pair.append(orthonormal(psi[bu], cols + pair))
+                pair.append(orthonormal(space.restrict(psi), cols + pair))
             cols += pair
             mus += [mu[k]]*len(pair)
             used.append(k)
@@ -297,6 +363,23 @@ def use_safe_solvers():
             x = scipy.sparse.linalg.spsolve(A, b)
         return x
 
+    def arpack(A, k, which, M, tol, v0, **kwargs):
+        """scipy eigsh with the ncv of eigsh_ncv, retried once with twice the
+        Lanczos vectors, k + 64 at least, if ARPACK fails"""
+        n = A.shape[0]
+        ncv = eigsh_ncv(k, n)
+        call = dict(k=k, ncv=min(n, max(2*k + 1, 20)) if ncv is None else ncv)
+        eigsh_calls.append(call)
+        try:
+            return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
+                    tol=tol, v0=v0, ncv=ncv, **kwargs)
+        except scipy.sparse.linalg.ArpackError as e:
+            call['error'] = str(e)
+            call['ncv'] = min(n, max(2*call['ncv'], k + 64))
+            print('# WARNING: %s, eigsh again with ncv=%d' % (e, call['ncv']))
+            return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
+                    tol=tol, v0=v0, ncv=call['ncv'], **kwargs)
+
     def eigsh(A, k, which, M, tol, v0):
         solver, Mu = cholesky(M)
         Minv = scipy.sparse.linalg.LinearOperator(M.shape, dtype=np.float64,
@@ -306,10 +389,8 @@ def use_safe_solvers():
             solver.free_memory(everything=True)
             print('# WARNING: PARDISO Cholesky residual %.1e in eigsh, using '
                     'SuperLU' % residual(M, x, v0))
-            return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
-                    tol=tol, v0=v0)
-        out = scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M, Minv=Minv,
-                tol=tol, v0=v0)
+            return arpack(A=A, k=k, which=which, M=M, tol=tol, v0=v0)
+        out = arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol, v0=v0)
         solver.free_memory(everything=True)
         return out
 
@@ -319,19 +400,24 @@ def use_safe_solvers():
 
 
 def choose_nxt(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
-        c1_threshold_factor=0.01, c2_threshold_factor=0.01):
+        c1_threshold_factor=0.01, c2_threshold_factor=0.01, axial_factor=1.):
     """Nodes along each transition region, and max_ny_nx_aspect_ratio
 
     Chosen so that no element of the transition or plateau regions is longer
-    than the circumferential element length dy. fkoiter_cylinder_CTS_circum
+    than dy/axial_factor, dy the circumferential element length, so that the
+    axial mesh can be refined at fixed ny. fkoiter_cylinder_CTS_circum
     gives a plateau of length c round(c/t*nxt) nodes, at least 2, or
     round(c/(dy/max_ny_nx_aspect_ratio)) nodes, at least 2, when the
     transition elements are more than max_ny_nx_aspect_ratio times shorter
     than dy. Either way a short plateau can get a single element, which is
     what the two parameters returned avoid. t, c1 and c2 are computed as in
-    fkoiter_cylinder_CTS_circum
+    fkoiter_cylinder_CTS_circum, which compares with the true dy the
+    transition elements it is given, as plateau_dx does
     """
     dy = 2*np.pi*R/ny
+    #NOTE dy itself for axial_factor=1, which reproduces the meshes of the
+    #     convergence studies
+    dx_max = dy/axial_factor
     if param_n == 0 or np.isclose(thetadeg_c1, thetadeg_c2):
         #NOTE constant stiffness, meshed from ny alone
         return 3, 2
@@ -345,9 +431,9 @@ def choose_nxt(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
         c1 = 0
     t = ((L - c1*(param_n+1))/param_n - c2)/2
     plateaus = [c for c in [c1, c2] if c > 0]
-    nxt = max(3, int(np.ceil(t/dy)) + 1)
+    nxt = max(3, int(np.ceil(t/dx_max)) + 1)
     for c in plateaus:
-        nxt = max(nxt, int(np.ceil((np.ceil(c/dy) + 0.5)*t/c)))
+        nxt = max(nxt, int(np.ceil((np.ceil(c/dx_max) + 0.5)*t/c)))
 
     def plateau_dx(c, max_ny_nx_aspect_ratio):
         if dy/(t/(nxt - 1)) > max_ny_nx_aspect_ratio:
@@ -357,13 +443,14 @@ def choose_nxt(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
         return c/(nodes - 1)
 
     max_ny_nx_aspect_ratio = 2
-    while any(plateau_dx(c, max_ny_nx_aspect_ratio) > dy for c in plateaus):
+    while any(plateau_dx(c, max_ny_nx_aspect_ratio) > dx_max
+              for c in plateaus):
         max_ny_nx_aspect_ratio += 1
     return nxt, max_ny_nx_aspect_ratio
 
 
 def estimate_nx(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
-        c1_threshold_factor=0.01, c2_threshold_factor=0.01):
+        c1_threshold_factor=0.01, c2_threshold_factor=0.01, axial_factor=1.):
     """Axial stations of the mesh of design_function, to within a few
 
     Used by generate_qsubs.py to estimate the time and memory of each run
@@ -376,7 +463,7 @@ def estimate_nx(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
         nx = int(ny*L/circ)
         return nx + 1 if nx % 2 == 0 else nx
     nxt, max_ny_nx_aspect_ratio = choose_nxt(L, R, ny, rCTS, param_n,
-            c2_ratio, thetadeg_c1, thetadeg_c2)
+            c2_ratio, thetadeg_c1, thetadeg_c2, axial_factor=axial_factor)
     t = rCTS*np.sin(abs(np.deg2rad(thetadeg_c2 - thetadeg_c1)))
     param_n = min(param_n, int(L/(2*t)))
     c2 = c2_ratio*(L - 2*t*param_n)/param_n
@@ -423,14 +510,15 @@ def design_function(variables, constants):
     #NOTE a fixed nxt gives elements 93 mm long next to elements 0.03 mm
     #     long across DOE09
     nxt, max_ny_nx_aspect_ratio = choose_nxt(L, R, ny, rCTS, param_n,
-            c2_ratio, thetadeg_c1, thetadeg_c2)
+            c2_ratio, thetadeg_c1, thetadeg_c2, axial_factor=axial_factor)
 
     out = fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12,
             rho, tow_thick, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
             mesh_only=mesh_only, Nxxunit=Nxxunit,
             num_eigvals=num_eigvals, koiter_num_modes=koiter_num_modes,
-            NLprebuck=NLprebuck,
-            max_ny_nx_aspect_ratio=max_ny_nx_aspect_ratio)
+            NLprebuck=NLprebuck, NLprebuck_eps1=NLprebuck_eps1,
+            max_ny_nx_aspect_ratio=max_ny_nx_aspect_ratio, nint=nint,
+            edges=edges)
     out['nxt'] = nxt
     out['max_ny_nx_aspect_ratio'] = max_ny_nx_aspect_ratio
     return out
@@ -593,6 +681,44 @@ def orbit_crest(field, rotate, v, num_phases=8):
                for t in np.arange(num_phases)/num_phases)
 
 
+def cluster_subsets(modes_n, distinct):
+    """Subsets of the Koiter modes made of whole wave-number clusters
+
+    A cluster is the modes of one circumferential wave number n, the
+    symmetric and antisymmetric modes and their rotated partners, 4 modes,
+    complete when both distinct modes of n are in the set; a further
+    distinct mode of n, another axial shape, and its partner are left out,
+    as they enter the set of some meshes only. b_min over the
+    set depends on how many clusters it holds, and which of them are in the
+    set changes with the mesh, their multipliers lying closer than each
+    moves between meshes (REPORT.md, Reassessment), so the set is followed
+    through subsets defined by the wave numbers instead:
+
+    - prefix: the first p clusters, in the order of the Koiter set, that is
+      of increasing multiplier;
+    - window: the wave numbers n_c - j to n_c + j about the critical one n_c,
+      that of mode 0, for as long as all of them are in the set.
+
+    Returns the modes of every wave number and the subsets as (kind, ns)
+    """
+    groups = {}
+    seen = {}
+    for k, n in enumerate(modes_n):
+        seen[n] = seen.get(n, 0) + distinct[k]
+        if seen[n] <= 2:
+            groups.setdefault(n, []).append(k)
+    order = list(groups)
+    subsets = [('prefix', order[:p]) for p in range(1, len(order) + 1)]
+    n_c = modes_n[0]
+    j = 0
+    while all(n in groups for n in range(n_c - j, n_c + j + 1)):
+        subsets.append(('window', list(range(n_c - j, n_c + j + 1))))
+        j += 1
+    complete = {n: sum(distinct[k] for k in idx) >= 2
+                for n, idx in groups.items()}
+    return groups, complete, subsets
+
+
 def use_koiter_denominators():
     """lambda_i*d_i of the Koiter modes, d_i = phi20_i . u_i
 
@@ -614,10 +740,56 @@ def use_koiter_denominators():
 
 
 if __name__ == '__main__':
-    icase = int(sys.argv[1])
-    NLprebuck = dict(LIN=False, NL=True)[sys.argv[2]]
-    if len(sys.argv) > 3:
-        ny = int(sys.argv[3])
+    import argparse
+    parser = argparse.ArgumentParser(description='one case of DOE09.txt')
+    parser.add_argument('icase', type=int)
+    parser.add_argument('prebuck', choices=['LIN', 'NL'])
+    parser.add_argument('ny', type=int, nargs='?', default=ny)
+    parser.add_argument('--distinct', type=int, default=koiter_num_distinct,
+            help='koiter_num_distinct, default %(default)s')
+    parser.add_argument('--num-eigvals', type=int, default=None,
+            help='num_eigvals, default %d for --distinct %d, 2K + 8 otherwise'
+                 % (num_eigvals, koiter_num_distinct))
+    parser.add_argument('--axial-factor', type=float, default=axial_factor,
+            help='largest axial element length dy/F, default %(default)s')
+    parser.add_argument('--eps1', type=float, default=NLprebuck_eps1,
+            help='NLprebuck_eps1, default %(default)s')
+    parser.add_argument('--nint', type=int, default=nint,
+            help='integration points per direction, default %(default)s')
+    parser.add_argument('--kinematics', choices=['sanders', 'donnell'],
+            default=kinematics, help='default %(default)s')
+    parser.add_argument('--thickness-factor', type=float,
+            default=thickness_factor,
+            help='factor on tow_thick, default %(default)s')
+    parser.add_argument('--nxxunit', type=float, default=Nxxunit,
+            help='load unit in N/m, default %(default)s')
+    parser.add_argument('--edges', choices=['SS3', 'SS4'], default=edges,
+            help='edge condition, default %(default)s')
+    args = parser.parse_args()
+    icase = args.icase
+    NLprebuck = dict(LIN=False, NL=True)[args.prebuck]
+    ny = args.ny
+    #NOTE num_eigvals leaves room for the K distinct modes, their partners,
+    #     the completion of the last group and one more distinct mode, which
+    #     distinct_first needs to know where the group ends
+    if args.num_eigvals is not None:
+        num_eigvals = args.num_eigvals
+    elif args.distinct != koiter_num_distinct:
+        num_eigvals = 2*args.distinct + 8
+    koiter_num_distinct = args.distinct
+    axial_factor = args.axial_factor
+    NLprebuck_eps1 = args.eps1
+    nint = args.nint
+    kinematics = args.kinematics
+    thickness_factor = args.thickness_factor
+    Nxxunit = args.nxxunit
+    edges = args.edges
+    if kinematics == 'donnell':
+        #NOTE before use_safe_solvers and the others, which patch the
+        #     functions of model; ElementField keeps BFSCCylinderSanders,
+        #     whose Sw is that of BFSCCylinder, w being bicubic in both
+        import bfsccylinder_models.koiter_cylinder_CTS as model
+        fkoiter_cylinder_CTS_circum = model.fkoiter_cylinder_CTS_circum
 
     DOE_vars = np.loadtxt(DOE_name + '.txt', skiprows=1)
     v1, v2, v3, v4, v5 = DOE_vars[icase]
@@ -639,10 +811,10 @@ if __name__ == '__main__':
         E22 = 7.32e9,
         nu12 = 0.31,
         G12 = 4.9e9,
-        tow_thick = 0.13e-3,
+        tow_thick = 0.13e-3*thickness_factor,
         rho = 1540,
         mesh_only = False,
-        Nxxunit = 1000.,
+        Nxxunit = Nxxunit,
         NLprebuck = NLprebuck,
         )
 
@@ -655,7 +827,12 @@ if __name__ == '__main__':
                   koiter_cluster_rtol=koiter_cluster_rtol,
                   #NOTE see generate_qsubs.py
                   koiter_set='complete_clusters',
-                  num_eigvals=num_eigvals)
+                  num_eigvals=num_eigvals, axial_factor=axial_factor,
+                  NLprebuck_eps1=NLprebuck_eps1, nint=nint,
+                  kinematics=kinematics, thickness_factor=thickness_factor,
+                  Nxxunit=Nxxunit, ss_edge_tangential=ss_edge_tangential,
+                  edges=edges,
+                  eigsh_calls=eigsh_calls)
     t0 = time.time()
     try:
         out = design_function(variables, constants)
@@ -712,6 +889,28 @@ if __name__ == '__main__':
             #NOTE crest and RMS from ElementField, see generate_qsubs.py
             crest_method='element_orbit',
             )
+        #NOTE b_min_energy, crest_e and b_min_t of subsets of whole
+        #     wave-number clusters, see cluster_subsets. The b_ijkl of a
+        #     subset are the sub-block of those of the set: the orthogonality
+        #     conditions of the second order fields take every Koiter mode,
+        #     so a subset is not a run on that subset alone. The combined
+        #     mode of a subset has no component in the planes of the other
+        #     modes, which pair_rotation leaves unchanged
+        modes_n = [mode_harmonics(out, k)[0] for k in range(m)]
+        groups, complete, subsets = cluster_subsets(modes_n, num_distinct[1])
+        rows = []
+        for kind, ns in subsets:
+            idx = sum((groups[n] for n in ns), [])
+            b_sub, e_sub = koiter_post.min_direction(
+                    b_energy[np.ix_(idx, idx, idx, idx)])
+            v = sum(e_sub[j]*s[k]*koiter['ui'][k] for j, k in enumerate(idx))
+            crest_sub = orbit_crest(field, rotate, v)
+            rows.append(dict(kind=kind, ns=ns, num_modes=len(idx),
+                    complete=all(complete[n] for n in ns),
+                    b_min_energy=b_sub, crest_e=crest_sub,
+                    b_min_t=b_sub/crest_sub**2,
+                    e=[float(x) for x in e_sub]))
+        result.update(subsets=rows)
         result.update(
             #NOTE param_n and c2_ratio as analyzed, which differ from v2 and
             #     v3 when param_n exceeds nmax or c2 falls below its threshold
@@ -722,6 +921,9 @@ if __name__ == '__main__':
             dx_max=float(np.diff(out['xlin']).max()),
             mass=float(out['mass']), Pcr=float(out['Pcr']),
             lambda_b=float(out['lambda_b']),
+            #NOTE the expansion point reached, lambda_b/lambda_c
+            lambda_ratio=float(out['lambda_b']/(out['Pcr']
+                    /(constants['Nxxunit']*2*np.pi*constants['R']))),
             b_factor=float(out['koiter']['b_ijkl'][(0, 0, 0, 0)]),
             n=n0, axi_share=axi0,
             mu_ratios=[float(m/mu[0]) for m in mu],
