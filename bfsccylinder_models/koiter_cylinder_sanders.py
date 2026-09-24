@@ -17,6 +17,7 @@ from bfsccylinder.utils import assign_constant_ABD
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
         axisymmetric_basis, project_axisymmetric, canonical_modes,
         degenerate_partner)
+from bfsccylinder_models.edges import edge_space
 from bfsccylinder_models.koiter_tensors import (koiter_element_tensors,
         a_coefficients, b_coefficients)
 
@@ -53,10 +54,11 @@ def nonlinear_rows(elem, xi, eta):
 def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         num_eigvals=2, koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
         NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
-        NR_eps=1.e-4, NR_eps_accept=1.e-3):
+        NR_eps=1.e-4, NR_eps_accept=1.e-3, edges='SS3'):
 
     circ = 2*np.pi*R
     out = {}
+    out['edges'] = edges
 
     out['nx'] = nx
     out['ny'] = ny
@@ -152,24 +154,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     print('# finished element assembly')
 
     # applying boundary conditions
-    bk = np.zeros(N, dtype=bool)
-
-    checkSS = isclose(x, 0) | isclose(x, L)
-    #NOTE every degree of freedom fixed at the edge nodes is fixed together
-    #     with its derivative along the edge, d/dy, so that the Hermite
-    #     interpolation along the edge makes it zero along the whole edge and
-    #     not at the nodes only: v with v,y and w with w,y. Fixing v and w
-    #     alone left the edges free to deflect between the nodes, an error
-    #     that vanishes only as the circumferential element length does
-    bk[3::DOF] = checkSS
-    bk[5::DOF] = checkSS
-    bk[6::DOF] = checkSS
-    bk[8::DOF] = checkSS
-    check = isclose(x, L/2.) & isclose(y, 0)
-    assert check.sum() == 1
-    bk[0::DOF] = check
-    bu = ~bk # same as np.logical_not, defining unknown DOFs
-    u0 = np.zeros(N, dtype=DOUBLE)
+    #NOTE u = T a, a the independent unknowns, see edges.py
+    space = edge_space(x, L, DOF, edges=edges, y=y)
 
     print('# starting static analysis')
 
@@ -209,17 +195,17 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
-    KC0uu = KC0[bu, :][:, bu]
+    KC0uu = space.matrix(KC0)
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
 
     # solving
-    uu = spsolve(KC0uu, fext[bu])
+    uu = spsolve(KC0uu, space.force(fext))
     cg_x0 = uu.copy()
 
-    u0[bu] = uu
+    u0 = space.expand(uu)
 
     #NOTE the fundamental path of a perfect cylinder under uniform axial
     #     compression is axisymmetric and the buckling modes are not, so
@@ -227,9 +213,14 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     the Newton-Raphson clear of the whole near critical cluster up to
     #     lambda_b/lambda_c close to 1, as AXBIF and ANILISA do
     axi_order = mesh_order(x, y, nx, ny)
-    axi_imid = np.argmin(np.abs(xlin - L/2.))
+    #NOTE the axial station where the axial rigid body translation is
+    #     removed, the one of the constraint that suppresses it
+    if edges == 'SS4':
+        axi_imid = 0
+    else:
+        axi_imid = np.argmin(np.abs(xlin - L/2.))
 
-    Baxi, buaxi = axisymmetric_basis(axi_order, bu, DOF)
+    Baxi, buaxi = axisymmetric_basis(axi_order, space.free, DOF)
 
     def project_axi(u):
         return project_axisymmetric(u, axi_order, axi_imid, DOF)
@@ -278,7 +269,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
                 tol=1e-6, v0=v0)
         mu = -1/eigvals
-        return eigvals, canonical_modes(mu, eigvecsu, bu,
+        return eigvals, canonical_modes(mu, eigvecsu, space,
                 axi_order, DOF), mu
 
     if NLprebuck:
@@ -353,8 +344,9 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 u = ui + solve_axi(KT, -Ri)
                 fint = calc_fint(u, fint)
                 Ri = fint - fext_b
-                crisfield_test = scaling(Ri[bu], D)/max(
-                        scaling(fext_b[bu], D), scaling(fint[bu], D))
+                crisfield_test = scaling(space.force(Ri), D)/max(
+                        scaling(space.force(fext_b), D),
+                        scaling(space.force(fint), D))
                 print('#        iteration', iteration, 'crisfield_test',
                         crisfield_test)
                 if crisfield_test < epsilon:
@@ -413,8 +405,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         print('# starting iterative eigenvalue analysis')
         converged = False
         for iteration in range(1, NLprebuck_maxiter+1):
-            KCuu = KC[bu, :][:, bu]
-            KGuu = KG[bu, :][:, bu]
+            KCuu = space.matrix(KC)
+            KGuu = space.matrix(KG)
             eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
             lambda_c = lambda_b*mu[0] # Eq. (46)
             print('#    iteration', iteration, 'lambda_b', lambda_b,
@@ -528,7 +520,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         KC = KC0
         KCuu = KC0uu
         KG = assemble_KG(u0)
-        KGuu = KG[bu, :][:, bu]
+        KGuu = space.matrix(KG)
         print('# starting eigenvalue analysis')
         eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
         lambda_c = lambda_b*mu[0]
@@ -555,8 +547,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     out['load_mult'] = load_mult
     out['lambda_b'] = lambda_b
     out['mu'] = mu
-    eigvecs = np.zeros((N, num_eigvals))
-    eigvecs[bu, :] = eigvecsu
+    eigvecs = space.expand(eigvecsu)
     out['eigvecs'] = eigvecs
     out['koiter'] = None
 
@@ -598,7 +589,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     eigen solver returns a partner is decided by round off, and one left
     #     out of the column border is a null vector of the whole bordered
     #     matrix, so it is rebuilt from the cyclic symmetry when missing
-    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
+    cols = [space.restrict(ua[modek]) for modek in range(koiter_num_modes)]
     for j in range(num_eigvals):
         if abs(mu[j] - mu[0]) > 1.e-3*abs(mu[0]):
             continue
@@ -606,9 +597,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
         group = [k for k in range(num_eigvals)
                  if abs(mu[k] - mu[j]) <= 1.e-5*abs(mu[j])]
         if len(group) == 1:
-            partner = degenerate_partner(eigvecs[:, j], bu, axi_order, DOF)
+            partner = degenerate_partner(eigvecs[:, j], space.free, axi_order,
+                    DOF)
             if partner is not None:
-                cols.append(partner[bu])
+                cols.append(space.restrict(partner))
     #NOTE the Koiter modes first, then what the other vectors add to them.
     #     Every eigenvector that is also a Koiter mode is in cols twice, and a
     #     QR factorization without pivoting would give the round off left of
@@ -631,8 +623,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     for modek in range(koiter_num_modes):
         ucond[modek] = ua[modek]
     for col in range(koiter_num_modes, Nsp.shape[1]):
-        v = np.zeros(N)
-        v[bu] = Nsp[:, col]
+        v = space.expand(Nsp[:, col])
         ucond[col] = v
     num_cond = len(ucond)
 
@@ -727,8 +718,8 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
     #     keeps the second order field from bringing back amplitude the
     #     expansion gave zero. See "Second-order fields and the orthogonality
     #     condition" in doc/nlprebuck_implementation.tex
-    nu = int(bu.sum())
-    W = phi20[bu]
+    nu = space.size
+    W = space.force(phi20)
 
     bordered = bmat([[phi2uu, csc_matrix(Nsp)],
                      [csc_matrix(W).T, None]], format='csc')
@@ -747,11 +738,10 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
                 uab[(modei, modej)] = uab[(modej, modei)]
                 continue
             rhs = np.zeros(nu + num_cond)
-            rhs[:nu] = force2ndorder_ij(modei, modej)[bu]
+            rhs[:nu] = space.force(force2ndorder_ij(modei, modej))
             rhs[nu:] = -cstq[modei, modej]
             sol = spsolve(bordered, rhs)
-            uijbar = np.zeros(N)
-            uijbar[bu] = sol[:nu]
+            uijbar = space.expand(sol[:nu])
             uab[(modei, modej)] = uijbar
 
     print('# b_ijkl factors')

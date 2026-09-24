@@ -131,6 +131,27 @@ cancelling.  The figures of Sections~\ref{sec:canonical} to
 \ref{sec:cts-recommendation} that were measured with the nodal condition say
 so.
 
+SS-4, \texttt{edges='SS4'} of the four Koiter models: the SS-3 conditions
+and, in addition, $u$ uniform along each edge, zero at $x = 0$ and one
+shared unknown at $x = L$, still under force control, the resultant of the
+same $N_{xx}$ being the reaction of that unknown.  $u_{,y}$ is fixed at the
+nodes of both edges and the axial degree of freedom of every node of $x = L$
+is tied to the shared one, so that, by the same Hermite argument, $u$ is
+uniform along the whole edge.  The tie is an exact change of basis,
+$\boldsymbol{u} = \boldsymbol{T}\boldsymbol{a}$, with the stiffness matrices
+reduced as $\boldsymbol{T}^T\boldsymbol{K}\boldsymbol{T}$ and the force
+vectors as $\boldsymbol{T}^T\boldsymbol{f}$
+(\texttt{bfsccylinder\_models/edges.py}); for SS-3, $\boldsymbol{T}$ is the
+selection of the unknown degrees of freedom and the models are unchanged to
+the last digit.  The axisymmetric subspace of the pre-buckling state and the
+rotation of a mode by one element both keep the tied displacements equal, so
+the rest of the analysis carries over; the axial rigid body translation is
+removed at $x = 0$ instead of $x = L/2$.  On the shell of
+\texttt{tests/test\_koiter\_cylinder\_Waters\_sanders.py} at $n_y = 40$
+(Sanders-Koiter), SS-4 raises the buckling load by 5.6 per cent with the
+linear pre-buckling state and 5.2 per cent with the nonlinear one, and moves
+$b_{1111}$ from $-0.044$ to $+0.137$ and from $-0.052$ to $-0.297$.
+
 %==============================================================================
 \section{Kinematics}
 %==============================================================================

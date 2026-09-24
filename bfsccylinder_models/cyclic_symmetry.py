@@ -118,7 +118,10 @@ def degenerate_partner(phi, bu, axi_order, DOF):
     phi : array-like
         The mode, over every degree of freedom.
     bu : array-like
-        Boolean mask of the unknown degrees of freedom.
+        Boolean mask of the degrees of freedom not fixed to zero, those tied
+        to a shared unknown included, see
+        :class:`~bfsccylinder_models.edges.EdgeSpace`: the rotation keeps
+        tied displacements equal.
     axi_order : array-like
         Node positions on the mesh, from :func:`mesh_order`.
     DOF : int
@@ -130,7 +133,8 @@ def degenerate_partner(phi, bu, axi_order, DOF):
     psi = rotated(phi, axi_order, DOF)
     #NOTE the constraint that suppresses the axial translation sits on a
     #     single node and is not itself symmetric, so the rotated mode does
-    #     not satisfy it. An axial rigid body translation carries no strain
+    #     not satisfy it (with the SS4 edges it is the whole edge x = 0, and
+    #     what follows subtracts nothing). An axial rigid body translation carries no strain
     #     and is annihilated by both stiffness matrices, so subtracting one
     #     restores the constraint without taking the mode out of its
     #     eigenspace. Truncating the offending degree of freedom instead does
@@ -181,8 +185,10 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
         Buckling multipliers, used only to find the degenerate groups.
     eigvecsu : array-like
         Eigenvectors as columns, over the unknown degrees of freedom.
-    bu : array-like
-        Boolean mask of the unknown degrees of freedom.
+    bu : array-like or EdgeSpace
+        Boolean mask of the unknown degrees of freedom, or the
+        :class:`~bfsccylinder_models.edges.EdgeSpace` of the model, whose
+        unknowns the eigenvectors are then over.
     axi_order : array-like
         Node positions on the mesh, from :func:`mesh_order`.
     DOF : int
@@ -193,6 +199,16 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
     """
     mu = np.asarray(mu)
     eigvecsu = np.array(eigvecsu, copy=True)
+    if hasattr(bu, 'expand'):
+        expand, restrict, bu = bu.expand, bu.restrict, bu.free
+    else:
+        def expand(a):
+            u = np.zeros(bu.shape[0], dtype=np.float64)
+            u[bu] = a
+            return u
+
+        def restrict(u):
+            return u[bu]
     num_eigvals = mu.shape[0]
     #NOTE radial degrees of freedom along the y = 0 generator
     rows = DOF*axi_order[:, 0] + 6
@@ -210,11 +226,9 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
             continue
         i0 = grp[0]
         i1 = grp[1] if len(grp) == 2 else None
-        phi = np.zeros(bu.shape[0], dtype=np.float64)
-        phi[bu] = eigvecsu[:, i0]
+        phi = expand(eigvecsu[:, i0])
         if i1 is not None:
-            psi = np.zeros(bu.shape[0], dtype=np.float64)
-            psi[bu] = eigvecsu[:, i1]
+            psi = expand(eigvecsu[:, i1])
         else:
             psi = degenerate_partner(phi, bu, axi_order, DOF)
             #NOTE no partner, or none that could be kept admissible, so the
@@ -232,7 +246,7 @@ def canonical_modes(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
         #     b_ijkl, is reproducible
         if trace[np.argmax(np.abs(trace))] < 0:
             c = -c
-        eigvecsu[:, i0] = (c[0]*phi + c[1]*psi)[bu]
+        eigvecsu[:, i0] = restrict(c[0]*phi + c[1]*psi)
         if i1 is not None:
-            eigvecsu[:, i1] = (-c[1]*phi + c[0]*psi)[bu]
+            eigvecsu[:, i1] = restrict(-c[1]*phi + c[0]*psi)
     return eigvecsu
