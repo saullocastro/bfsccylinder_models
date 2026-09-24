@@ -1,0 +1,363 @@
+# DOE09: normalization and completeness of the multi-mode Koiter analysis
+
+Mesh convergence of the multi-mode post-buckling coefficients of
+`koiter_cylinder_CTS_sanders.fkoiter_cylinder_CTS_circum` (version 0.4.0) for
+the DOE09 designs A, B and C (cases 0, 1 and 6), and the setup chosen for the
+20,000 runs of the DOE. No DOE run has been submitted; the decision on the
+mesh is open, see [Decision](#9-decision).
+
+The library is unchanged. Every change is in the DOE09 driver, copied in
+[`scripts/`](scripts): `run_case.py`, `koiter_post.py` (new), `post.py`,
+`post_convergence.py`, `generate_qsubs.py` and
+`generate_qsubs_convergence.py`. The tables of the three convergence studies
+are in [`tables/`](tables), the diagnostic scripts in [`checks/`](checks).
+
+## Summary
+
+1. Pcr is converged at ny = 160: within 0.5 % of ny = 200.
+2. The single-mode b and the multi-mode b_iiii of the models do not converge,
+   and are not reproducible, for two independent reasons:
+   - **normalization**: the modes are scaled by their largest *nodal*
+     translation, which misses the crest of a mode between nodes (3-5 % at
+     ny = 80, b moving by 6-10 %);
+   - **mode set**: the critical modes of these cylinders come as symmetric and
+     antisymmetric pairs of end-localized buckles. When the two share their
+     multiplier to round off (case 1 with NLprebuck: 1.7e-14), each wave number
+     has a four-dimensional eigenspace, of which the eigen solver returns an
+     arbitrary two-dimensional slice. The 5-mode b_ijkl then depend on round
+     off (13 % on b_iiii, 5-30 % on the minimum of b).
+3. Following the multi-mode analysis of Rahman (2009), the expansion is now
+   made on the 5 distinct modes **and their rotated partners**
+   (koiter_num_modes = 10), made K_C-orthonormal, with the **energy
+   normalization** lambda_i |d_i| = 1, and summarized by the most imperfection
+   sensitive direction of Salerno, b_min. b_min is invariant under the choice
+   of the eigenspace slice to 7e-6. `b_min_t` is b_min for the combined mode
+   scaled to a crest of w equal to the thickness.
+4. With this setup, b_min_t varies smoothly from ny = 120 on; ny = 160 is
+   within 2-7 % of ny = 200 for NL and within 10 % for LIN, but it is not yet
+   converged for all cases.
+5. Cost: the 10-mode Koiter section takes 47 ms per element; the DOE is
+   19,100 core-hours at ny = 160 and 28,900 at ny = 200.
+
+## 1. Pcr and the single-mode b
+
+Single-mode study, [`tables/DOE09_convergence_single_mode.txt`](tables/DOE09_convergence_single_mode.txt),
+NLprebuck = True:
+
+| case | Pcr ny=160 | Pcr ny=200 | diff | b ny=80 | b ny=120 | b ny=160 | b ny=200 |
+|---|---|---|---|---|---|---|---|
+| 0 | 3872.2 | 3864.8 | 0.19 % | -0.243 | -0.334 | -0.235 | -0.220 |
+| 1 | 8961.5 | 8954.2 | 0.08 % | -0.264 | -0.230 | -0.263 | -0.281 |
+| 6 | 4558.0 | 4534.7 | 0.51 % | -0.536 | -0.244 | -0.275 | -0.330 |
+
+b oscillates with the mesh. mu1_ratio, the multiplier of the second mode over
+the critical one, is 1.00001 to 1.002, below the 0.005 gap for which the
+single-mode b is determinate (sec:convergence of the manuscript).
+
+## 2. The 5-mode study with the nodal normalization
+
+[`tables/DOE09_convergence_k5_nodal.txt`](tables/DOE09_convergence_k5_nodal.txt)
+(koiter_num_modes = 5, 23 of 24 runs; case 6, NL, ny = 120 segfaulted when the
+SuperLU fallback ran out of its 8 GB, and its rerun was superseded).
+
+The b_iiii of individual modes are not comparable across meshes, the modes
+changing order (case 0 NL: critical n = 30 at ny = 160, 31 at ny = 200). The
+minimum over unit xi of the quartic form b(xi) = b_ijkl xi_i xi_j xi_k xi_l
+of the nodal-scaled modes, over the critical pair and over all 5 modes:
+
+| case | ny=80 | ny=120 | ny=160 | ny=200 |
+|---|---|---|---|---|
+| 0 NL, critical pair | -0.487 | -0.670 | -0.473 | -0.248 |
+| 0 NL, 5 modes | -1.083 | -0.916 | -0.604 | -0.612 |
+| 1 NL, critical pair | -0.348 | -0.303 | -0.284 | -0.321 |
+| 1 NL, 5 modes | -0.656 | -0.451 | -0.435 | -0.640 |
+| 6 NL, critical pair | -0.855 | | -0.301 | -0.331 |
+| 6 NL, 5 modes | -1.474 | | -0.592 | -0.584 |
+| 0 LIN, 5 modes | -0.344 | 0.219 | 0.224 | 0.238 |
+| 1 LIN, 5 modes | -1528 | 0.011 | 0.021 | 0.021 |
+| 6 LIN, 5 modes | -5.594 | -0.103 | -0.119 | -0.147 |
+
+Changes of 10-50 % from ny = 160 to 200, not monotone.
+
+## 3. What the modes are
+
+[`checks/mode_pairs.py`](checks/mode_pairs.py), case 0, LIN, ny = 80. The
+modes with the same wave number n, which the eigen solver returns in pairs of
+nearly equal multiplier (1e-4 apart), are **not** rotations of each other:
+
+- their axial profiles are orthogonal, overlaps 0.0048, 0.0027, 0.0081,
+  0.0012, 0.016 and 0.0006 for the six pairs;
+- one is symmetric and the other antisymmetric about mid-length, the number of
+  sign changes of the profile differing by one;
+- their sum is localized at one end of the cylinder, their difference at the
+  other: end-localized buckles, coupled weakly through the length.
+
+The true rotated partner of each mode is not among the returned eigenvectors
+(residual 1.0 in their span), as expected from a Krylov solver with one
+starting vector; `degenerate_partner` rebuilds it. So num_distinct = 12 is
+right and `run_case.use_distinct_modes` works as designed.
+
+## 4. Normalization: the literature
+
+- **Single-mode.** Rahman, Jansen and Wijker (2007), and Rahman (2009),
+  Ch. 2: "the buckling modes are scaled such that the maximum radial
+  displacement is equal to the shell thickness", the convention of ANILISA,
+  whose mode amplitude is in thicknesses. Whether the maximum is taken at the
+  nodes or over the field is not stated. Castro and Jansen (2021): "customarily
+  re-scaled dividing by the maximum normal displacement amplitude and
+  multiplying by the plate or shell thickness". This is what the models do,
+  at the nodes.
+- **Multi-mode.** Rahman (2009), Ch. 3, the basis of Rahman, Jansen and
+  Gürdal (2009, AIAA 2009-2557):
+  - the modes are scaled by an energy norm, Eq. (3.21),
+    lambda_I q_I^T [dK_D + dK_G] q_I = 1, that is lambda_I Delta_I = 1
+    (Eq. 3.15), the convention of Byskov and Hutchinson;
+  - A_ijkl is averaged over the permutations of its indices, which with that
+    normalization makes b_Ijkl fully symmetric (Eq. 3.14, 3.16);
+  - the cluster is summarized by the minimum direction of Salerno,
+    b_ijkI e_i e_j e_k = b e_I with e.e = 1 (Eq. 3.31), whose lowest
+    eigenvalue is the post-buckling coefficient of the cluster;
+  - the thickness enters only when results are reported: modes rescaled to a
+    maximum out-of-plane displacement equal to the thickness for comparison
+    with ANILISA, and imperfection amplitudes set by "the maximum out-of-plane
+    displacement of the imperfection shape", the combined one.
+
+Section sec:normalisation of `doc/nlprebuck_implementation.tex` already
+recommends the crest normalization over the nodal one, for the single-mode b.
+
+## 5. Normalizations implemented
+
+All in `run_case.py` and [`scripts/koiter_post.py`](scripts/koiter_post.py),
+without changing the library. Every term of b_ijkl in `b_coefficients`
+carries the four mode amplitudes and its denominator d_i = phi20_i . u_i the
+square of that of mode i, so for modes rescaled by s_i, exactly,
+
+    b'_ijkl = b_ijkl s_j s_k s_l / s_i,    a'_ijk = a_ijk s_j s_k / s_i
+
+Checked against a copy of the library multiplying the 5 modes by 1.3, 0.7,
+1.9, 0.55 and 1.15 (case 6, NL, ny = 40): 1.6e-7 relative difference on
+b_ijkl (a_ijk, 5e-9, is zero by symmetry). The normalization can therefore
+be chosen after the runs; each run stores the scales:
+
+| name | scale s_i | stored |
+|---|---|---|
+| nodal | 1, the models: largest nodal translation = h | `b_ijkl`, `a_ijk` |
+| crest | 1/crest_w: crest of w, between nodes too, = h | `crest_w` |
+| rms | 1/rms_w: RMS of w over the surface = h | `rms_w` |
+| energy | 1/sqrt(lambda_i abs(d_i)), Rahman Eq. (3.21) | `lambda_d` |
+
+- `crest_w` follows the envelope of the mode and its rotated partner along the
+  axis with the cubic Hermite interpolation in w and w_x, as
+  `reference_b_convergence.py` does. Case 0, LIN, ny = 80: crest_w = 1.049,
+  1.049, 1.046, 1.046, 1.029, moving b_iiii from -0.0789 to -0.0717.
+- `lambda_d` is captured by wrapping `b_coefficients` of the model.
+- `b_min_energy`: minimum of the symmetrized energy-normalized b_ijkl over
+  e.e = 1 (Salerno), `e_min` its direction.
+- `b_min_t = b_min_energy / crest_e**2`, crest_e being the crest of w of the
+  combined mode sum_i e_i s_i u_i in thicknesses, found with the bicubic
+  Hermite interpolation of the element (w, w_x, w_y, w_xy), since a
+  combination of wave numbers is not a single harmonic. On single modes the
+  bicubic crest agrees with the envelope one exactly when the crest is on a
+  node, and to 0.4 % at ny = 80 in case 0, 3.3 elements per wavelength.
+
+## 6. The mode set: four-fold eigenspaces
+
+### Evidence
+
+[`checks/fourfold_degeneracy.py`](checks/fourfold_degeneracy.py), case 1,
+NL, ny = 80:
+
+- multipliers over the critical one minus one: 0, 1.7e-14, 3.1e-4, 3.1e-4,
+  7.4e-3, ...;
+- the two n = 22 modes and their rotated partners span four dimensions,
+  singular values 1.018, 1.018, 0.982, 0.982; the n = 23 modes likewise,
+  1.177, 1.177, 0.784, 0.784;
+- the returned n = 23 modes are neither symmetric nor antisymmetric: mode 2
+  has its amplitude at the left end (0.041 against 0.012), mode 3 at the right
+  one (0.016 against 0.039).
+
+So the symmetric/antisymmetric splitting is below round off, each wave number
+has a four-dimensional eigenspace (2 axial shapes x 2 rotations), and the
+eigen solver returns an arbitrary two-dimensional slice of it.
+`canonical_modes` then treats the slice as a rotation pair.
+
+### Consequences, 5-mode expansion
+
+Case 1, NL, ny = 80, with the 5-mode `run_case.py` of that stage:
+
+- [`checks/pair_mixing.py`](checks/pair_mixing.py), modes 0 and 1 rotated by
+  30 degrees in their plane after the ordering of `use_distinct_modes`: the
+  5-mode b_min (energy normalization, computed afterwards from the stored
+  b_ijkl) went from -0.475 to -0.449, and b_2222 from -0.295 to -0.255,
+  although modes 2 and 3 were not touched;
+- [`checks/same_process_resolve.py`](checks/same_process_resolve.py), the
+  same model solved twice in one process, the second time with the same
+  mixing of modes 0 and 1: the pre-buckling state agreed to 3e-14, but mode 2
+  differed (relative difference 1.27), b_2222 = -0.286 against -0.255. The
+  mixing of modes 0 and 1 cannot change mode 2, so the slice of the n = 23
+  eigenspace returned by the eigen solver changed between the two solves.
+
+### Fix
+
+`use_distinct_modes` with `koiter_rotation_closed = True`:
+
+1. the 5 distinct modes, each followed by its rotated partner, 10 Koiter
+   modes; an axisymmetric mode, which has no partner, takes one column;
+2. every column made K_C-orthonormal to the previous ones (K_C captured from
+   the eigen solve), the partner being built from the mode so made. The
+   Koiter section of the models assumes the modes orthogonal in the metric of
+   the load term, using d_i only and never d_ij; eigenvectors are, but a
+   partner from `degenerate_partner` is orthogonal to its own mode only.
+
+[`checks/eigenspace_slice.py`](checks/eigenspace_slice.py) feeds the model a
+different slice of the same eigenspaces, raw eigenvector 1 replaced by
+cos 30 m1 + sin 30 P(m0), and eigenvector 3 likewise. Case 1, NL, ny = 80:
+
+| | original slice | other slice |
+|---|---|---|
+| closed, not orthonormalized: b_min_energy | -0.5733 | -0.7540 |
+| closed and K_C-orthonormal: b_min_energy | **-0.597485** | **-0.597481** |
+| closed and K_C-orthonormal: b_min_t | -0.2218 | -0.2192 |
+| closed and K_C-orthonormal: nodal b_0000 | -0.2608 | -0.2710 |
+
+b_min is invariant to 7e-6. b_min_t differs by 1.2 %: the minimum direction
+is defined only up to a rotation of the cylinder, and the crest of the
+rotated field falls differently between the nodes.
+
+## 7. Convergence with the closed basis and the energy normalization
+
+[`tables/DOE09_convergence_k5c.txt`](tables/DOE09_convergence_k5c.txt), all
+24 runs finished, no PARDISO fallback to SuperLU, no incomplete nonlinear
+pre-buckling iteration. Case 6, NL, ny = 120, which segfaulted in the study
+of Section 2, finished at 8 GB with a 2.8 GB peak.
+
+b_min_t:
+
+| case | ny=80 | ny=120 | ny=160 | ny=200 | 160 to 200 |
+|---|---|---|---|---|---|
+| 0 LIN | -0.0722 | 0.1267 | 0.1240 | 0.1294 | 4.3 % |
+| 0 NL | -0.1281 | -0.1464 | -0.1576 | -0.1658 | 5.2 % |
+| 1 LIN | -0.8761 | 0.03756 | 0.03756 | 0.03756 | 0 % |
+| 1 NL | -0.2301 | -0.1733 | -0.1792 | -0.1910 | 6.6 % |
+| 6 LIN | -1.7409 | -0.0373 | -0.0486 | -0.0534 | 9.8 % |
+| 6 NL | -0.4224 | -0.1919 | -0.2189 | -0.2239 | 2.3 % |
+
+b_min_energy and crest_e:
+
+| case | b_min_energy ny=120 / 160 / 200 | crest_e ny=120 / 160 / 200 |
+|---|---|---|
+| 0 LIN | 0.267 / 0.289 / 0.316 | 1.451 / 1.526 / 1.562 |
+| 0 NL | -22.53 / -19.86 / -21.21 | 12.41 / 11.23 / 11.31 |
+| 1 LIN | 0.0083 / 0.0083 / 0.0083 | 0.470 / 0.470 / 0.470 |
+| 1 NL | -0.545 / -0.550 / -0.634 | 1.773 / 1.753 / 1.821 |
+| 6 LIN | -0.592 / -0.803 / -0.860 | 3.985 / 4.064 / 4.016 |
+| 6 NL | -7.539 / -7.760 / -8.215 | 6.268 / 5.954 / 6.057 |
+
+Richardson extrapolation of b_min_t from ny = 120, 160 and 200:
+
+| case | order | extrapolated | error at 160 | error at 200 |
+|---|---|---|---|---|
+| 0 LIN | not monotone | | | |
+| 0 NL | 0.20 | -0.347 | 55 % | 52 % |
+| 1 LIN | constant | 0.0376 | 0 | 0 |
+| 1 NL | not monotone (step ratio 2.0) | | | |
+| 6 LIN | 2.36 | -0.0602 | 19 % | 11 % |
+| 6 NL | 5.44 | -0.2260 | 3.1 % | 0.9 % |
+
+Observations:
+
+- ny = 80 is unusable: the signs flip against the finer meshes.
+- From ny = 120 on the values vary smoothly, against the 10-50 % oscillation of
+  Section 2. Case 6 NL is in the asymptotic range; cases 0 NL and 1 NL still
+  drift by 5-7 % per step, and the extrapolation for 0 NL (order 0.2) is not
+  reliable, so their error at ny = 160 may exceed the 160 to 200 difference.
+- Case 1 LIN is governed by an axisymmetric mode, e_min = mode 0 alone, and
+  is mesh independent from ny = 120.
+- The minimum directions mix all 10 modes; e_min of every run is in the
+  RESULT line of its output.
+
+## 8. Cost
+
+The 10-mode Koiter section takes 30 ms per element more than the 5-mode one,
+the median of the 24 pairs of runs (23 to 38 ms, one-core runs on shared
+nodes), 47 ms per element in all, now in `koiter_time_per_element` of
+`generate_qsubs.py`. Peak memory 13.5 GB for the largest run, case 0, NL,
+ny = 200, 57 min.
+
+| ny | core-hours | jobs |
+|---|---|---|
+| 160 | 19,100 | 402 |
+| 200 | 28,900 | 1,058 |
+
+(15,800 core-hours at ny = 160 with the 5-mode setup.)
+
+## 9. Decision
+
+Open, one of:
+
+1. **ny = 240 and 280 for cases 0, 1 and 6, LIN and NL, first** (12 runs, a
+   few hours each), to see whether b_min_t settles before committing the DOE.
+   Recommended.
+2. **DOE at ny = 160**, 19,100 core-hours, with a mesh uncertainty of about
+   5-10 % on b_min_t from this study; Pcr converged.
+3. **DOE at ny = 200**, 28,900 core-hours, not shown to be converged either.
+
+## 10. Issues in the library
+
+Reported, not changed; both are worked around in `run_case.py`:
+
+1. `canonical_modes` (`cyclic_symmetry.py`) treats every group of two equal
+   multipliers as a rotation pair and rotates it to put a crest on the y = 0
+   generator. In a four-fold eigenspace the two returned vectors are not a
+   rotation pair, and the result depends on round off.
+2. The Koiter section (`koiter_cylinder_CTS_sanders.py`, the null space and
+   `b_coefficients`) assumes the Koiter modes orthogonal in the metric of the
+   load term, d_ij = 0 for i != j. Eigenvectors of distinct multipliers are;
+   modes combined with partners built by `degenerate_partner` inside a
+   four-fold eigenspace are not, unless made so as in Section 6.
+3. The known non-symmetry of the multi-mode b_ijkl (`doc/nlprebuck_implementation.tex`,
+   "Known limitations") is untouched; b_min uses the part of b_ijkl
+   symmetric in all four indices, as Rahman (2009) does, which is also the
+   only part the quartic form sees.
+
+## 11. Changes to the DOE09 driver
+
+- `run_case.py`
+  - `koiter_num_distinct = 5`, `koiter_rotation_closed = True`,
+    `koiter_num_modes = 10`, `use_distinct_modes` as in Section 6;
+  - `mode_amplitudes` (crest_w, rms_w), `use_koiter_denominators`
+    (lambda_d), `field_crest` (bicubic crest), and b_min_energy, e_min,
+    crest_e, b_min_t, koiter_distinct in the RESULT line.
+- `koiter_post.py`: `rescaled`, `energy_scales`, `symmetrized`,
+  `min_direction`.
+- `post.py`: `DOE09_koiter.npz` with the nodal b_ijkl and a_ijk of the 10
+  modes, the scales of the other normalizations, b_min_energy, b_min_t,
+  crest_e and e_min; b_min_t and b_min_energy in `DOE09_output.txt`.
+- `post_convergence.py`: columns b_min_t, b_min_energy, crest_e, b_iiii_crest,
+  b_iiii_rms, crest_w; default study `_k5c`.
+- `generate_qsubs.py`: requires the closed 10-mode setup, reruns outputs of
+  earlier setups, `koiter_time_per_element = 0.047`, `python -u` so that a
+  crashed run keeps its log.
+- `generate_qsubs_convergence.py`: suffix `_k5c`, walltime 12 h, `python -u`,
+  reruns outputs without b_min_energy.
+
+The scripts in [`checks/`](checks) were run from the DOE09 directory, next to
+`DOE09.txt`, with the `run_case.py` of their stage: `mode_pairs.py`,
+`pair_mixing.py` and `same_process_resolve.py` with the 5-mode one, `fourfold_degeneracy.py` and
+`eigenspace_slice.py` with the 10-mode one of [`scripts/`](scripts).
+
+## References
+
+- Castro, S.G.P. and Jansen, E.L. (2021). Displacement-based formulation of
+  Koiter's method: application to multi-modal post-buckling finite element
+  analysis of plates. Thin-Walled Structures 159, 107217.
+- Rahman, T. (2009). A perturbation approach for geometrically nonlinear
+  structural analysis using a general purpose finite element code. PhD
+  thesis, Delft University of Technology.
+  https://resolver.tudelft.nl/uuid:80e11dbd-90be-44f1-bb36-049503a265bd
+- Rahman, T., Jansen, E.L. and Gürdal, Z. (2009). Finite element based
+  multi-mode initial post-buckling analysis of composite cylindrical shells.
+  AIAA 2009-2557.
+- Rahman, T., Jansen, E.L. and Wijker, J.J. (2007). Finite element based
+  initial post-buckling analysis of conical shell structures. 1st CEAS
+  European Air and Space Conference, CEAS-2007-164, 1809-1816.
