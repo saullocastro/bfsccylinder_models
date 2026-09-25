@@ -3,17 +3,19 @@ scripts/generate_qsubs_convergence.py
 
 From the RESULT lines, archived in results/DOE09_conv_ir.jsonl.gz, one
 {"file": ..., "result": ...} per run, result null for a run that wrote none.
-For every edge condition (SS3-IR, free-IR) and case (0, 1, 6), NL, eps1 =
-0.0005:
+For every case (0, 1, 6), NL, eps1 = 0.0005, on the SS3 edges with inertia
+relief of the models:
 
 - per axial factor F, the ny sequence: nx, dx max, the critical wave number
   n_c and the elements per wave ny/n_c, Pcr, the number of Koiter modes m,
   b_min_t of the full set, of the critical cluster alone (crit b_t) and of
   the window n_c +- 1 (win1 b_t, * a cluster of it incomplete), and the
   Richardson extrapolation in ny over every three consecutive meshes;
-- over all meshes with at least min_per_wave elements per wave of n_c, the
-  fit f = f_inf + a/ny**p + c/nx**q, and the error of every mesh against
-  f_inf split into its ny and nx parts.
+- over the meshes with F >= 2, where nx grows with ny, and at least
+  min_per_wave elements per wave of n_c, the fit f = f_inf + a/ny**p +
+  c/nx**q, and the error of every mesh against f_inf split into its ny and
+  nx parts. The meshes with F <= 1 are left out: for case 1 they keep
+  nx = 67 up to ny = 96, which misses the critical mode.
 
 A cluster is the modes of one wave number (cluster_subsets.py).
 
@@ -36,8 +38,7 @@ import cluster_subsets as cs
 
 here = os.path.join(os.path.dirname(__file__), '..')
 archive_name = os.path.join(here, 'results', 'DOE09_conv_ir.jsonl.gz')
-patterns = ['DOE09_conv_*_NL_SS3IR_F*_eps0p0005.out',
-            'DOE09_conv_*_NL_freeIR_F*_eps0p0005.out']
+patterns = ['DOE09_conv_*_NL_SS3IR_F*_eps0p0005.out']
 
 
 def archive(workdir):
@@ -146,10 +147,11 @@ def fit_grid(nys, nxs, f):
     return best
 
 
-def grid(rows, min_per_wave):
-    rows = [r for r in rows if r['ny']/r['modes_n'][0] >= min_per_wave]
+def grid(rows, min_per_wave, min_F=2.):
+    rows = [r for r in rows if r['ny']/r['modes_n'][0] >= min_per_wave
+            and r['axial_factor'] >= min_F]
     print('\n  fit f = f_inf + a/ny**p + c/nx**q over the %d meshes with '
-          'ny/n_c >= %g' % (len(rows), min_per_wave))
+          'ny/n_c >= %g and F >= %g' % (len(rows), min_per_wave, min_F))
     if len(rows) < 5:
         print('  too few meshes')
         return
@@ -173,19 +175,17 @@ def grid(rows, min_per_wave):
 
 def main(min_per_wave=4.):
     runs = load()
-    for edges in ['SS3-IR', 'free-IR']:
-        for case in [0, 1, 6]:
-            rows = [r for r in runs if r.get('edges') == edges
-                    and r['case'] == case]
-            if not rows:
-                continue
-            print('\n%s, case %d NL, eps1 = 0.0005' % (edges, case))
-            for F in sorted(set(r['axial_factor'] for r in rows)):
-                seq = sorted([r for r in rows if r['axial_factor'] == F],
-                             key=lambda r: r['ny'])
-                print('\n %s, case %d, F = %g' % (edges, case, F))
-                sequence(seq)
-            grid(rows, min_per_wave)
+    for case in [0, 1, 6]:
+        rows = [r for r in runs if r['case'] == case]
+        if not rows:
+            continue
+        print('\ncase %d NL, eps1 = 0.0005' % case)
+        for F in sorted(set(r['axial_factor'] for r in rows)):
+            seq = sorted([r for r in rows if r['axial_factor'] == F],
+                         key=lambda r: r['ny'])
+            print('\n case %d, F = %g' % (case, F))
+            sequence(seq)
+        grid(rows, min_per_wave)
 
 
 if __name__ == '__main__':

@@ -85,9 +85,11 @@ the bifurcation load.
 \subsection{Edge conditions}
 \label{sec:edges}
 
-SS-3 at $x = 0$ and $x = L$: $v = w = 0$, the rotation and $u$ free, $u$
-loaded by $N_{xx}$, and $u$ fixed at a single node against the axial rigid
-body translation.  Every degree of freedom fixed at the edge nodes is fixed
+Every model supports the cylinder in the same way,
+\texttt{bfsccylinder\_models/edges.py}: SS-3 at $x = 0$ and $x = L$, $v = w =
+0$, the rotation and $u$ free, the axial load $N_{xx}$ applied on both edges,
+and no node anchored, the axial rigid body translation being removed by
+inertia relief (below).  Every degree of freedom fixed at the edge nodes is fixed
 together with its derivative along the edge, $v$ with $v_{,y}$ and $w$ with
 $w_{,y}$, since the Hermite interpolation of the element builds $v$ and $w$
 along the edge from both.  Fixing $v$ and $w$ alone, as all the models did
@@ -131,50 +133,32 @@ cancelling.  The figures of Sections~\ref{sec:canonical} to
 \ref{sec:cts-recommendation} that were measured with the nodal condition say
 so.
 
-SS-4, \texttt{edges='SS4'} of the four Koiter models: the SS-3 conditions
-and, in addition, $u$ uniform along each edge, zero at $x = 0$ and one
-shared unknown at $x = L$, still under force control, the resultant of the
-same $N_{xx}$ being the reaction of that unknown.  $u_{,y}$ is fixed at the
-nodes of both edges and the axial degree of freedom of every node of $x = L$
-is tied to the shared one, so that, by the same Hermite argument, $u$ is
-uniform along the whole edge.  The tie is an exact change of basis,
-$\boldsymbol{u} = \boldsymbol{T}\boldsymbol{a}$, with the stiffness matrices
-reduced as $\boldsymbol{T}^T\boldsymbol{K}\boldsymbol{T}$ and the force
-vectors as $\boldsymbol{T}^T\boldsymbol{f}$
-(\texttt{bfsccylinder\_models/edges.py}); for SS-3, $\boldsymbol{T}$ is the
-selection of the unknown degrees of freedom and the models are unchanged to
-the last digit.  The axisymmetric subspace of the pre-buckling state and the
-rotation of a mode by one element both keep the tied displacements equal, so
-the rest of the analysis carries over; the axial rigid body translation is
-removed at $x = 0$ instead of $x = L/2$.  On the shell of
-\texttt{tests/test\_koiter\_cylinder\_Waters\_sanders.py} at $n_y = 40$
-(Sanders-Koiter), SS-4 raises the buckling load by 5.6 per cent with the
-linear pre-buckling state and 5.2 per cent with the nonlinear one, and moves
-$b_{1111}$ from $-0.044$ to $+0.137$ and from $-0.052$ to $-0.297$.
+Inertia relief.  The translation $\boldsymbol{r}$, $u = 1$ at every node,
+is the only rigid body mode these edges leave; it is removed by the
+condition $\boldsymbol{C}^T\boldsymbol{a} = 0$, $\boldsymbol{C} =
+\boldsymbol{M}\boldsymbol{r}$ restricted to the unknowns, with
+$\boldsymbol{M}$ the consistent mass matrix at unit density (the density is
+uniform in every model and only scales it): the centre of mass does not move
+axially.  The condition is imposed exactly: by elimination in the static
+solves, as the inverse of the constitutive stiffness on the null space of
+$\boldsymbol{C}^T$ in the generalized mode of ARPACK, and as a further
+border of the bordered system of the second order fields and of the
+axisymmetric pre-buckling solves.  The translation is a null vector of every
+operator, so the buckling loads and $b_{ijkl}$ are those of the same edges
+with $u$ fixed at one node, as the models had them before, to round off
+($10^{-12}$ in the buckling load and $5\times10^{-9}$ in $b_{1111}$ on the
+shell of \texttt{tests/test\_koiter\_cylinder\_Waters\_sanders.py}, with the
+linear and the nonlinear pre-buckling state); the displacements differ by a
+rigid translation.  \texttt{linbuck\_VAFW.py}, displacement controlled with
+clamped edges before, has the same edges and load since.
 
-Inertia relief, \texttt{edges='SS3-IR'} and \texttt{'free-IR'}: the axial
-load on both edges and no node anchored.  SS3-IR keeps $v = w = 0$ along both
-edges; free-IR fixes nothing.  Every rigid body mode $\boldsymbol{R}$ the
-edges leave free (the axial translation for SS3-IR, all six for free-IR) is
-removed by the condition $\boldsymbol{C}^T\boldsymbol{a} = 0$,
-$\boldsymbol{C} = \boldsymbol{T}^T\boldsymbol{M}\boldsymbol{R}$, with
-$\boldsymbol{M}$ the consistent mass matrix: the centre of mass does not move
-and the shell does not rotate as a whole.  The condition is imposed exactly:
-by elimination in the static solves, as the inverse of the constitutive
-stiffness on the null space of $\boldsymbol{C}^T$ in the generalized mode of
-ARPACK, and as a further border of the bordered system of the second order
-fields and of the axisymmetric pre-buckling solves.  The axial translation
-and the rotation about the axis are null vectors of $\boldsymbol{K}_{C0}$ to
-round off; the transverse translations and rotations only to the
-interpolation error of $\cos\theta$ and $\sin\theta$ ($10^{-9}$ and
-$2\times10^{-5}$ of the energy of a smooth field at $n_y = 40$), and the
-rotations are not null vectors of the geometric stiffness matrix, so
-anchoring a statically determinate set of nodes and subtracting the rigid
-component afterwards would not be exact.  On the shell above, SS3-IR gives
-the SS3 buckling load to $10^{-12}$ and $b_{1111}$ to $5\times10^{-9}$, with
-the linear and the nonlinear pre-buckling state.  With free-IR the lowest
-modes are the $n = 2$, 3 and 4 ovalizations of the free edges, at about 2
-per cent of the SS3 buckling load at $n_y = 40$ and 1 per cent at $n_y = 80$.
+Two other supports were implemented and removed again (git history up to
+commit \texttt{1fc65e2}).  SS-4, $u$ uniform along each edge, raised the
+buckling load by 1 to 6 per cent and moved $b$ by 11 to 27 per cent on the
+DOE09 designs.  Free edges, all six rigid body modes removed by inertia
+relief, buckle in the $n = 2$ to 6 ovalizations of the free edges, at 2.5 to
+6 per cent of the SS-3 load on the DOE09 designs and still falling as the
+mesh is refined; they are not a buckling problem of the shell.
 
 %==============================================================================
 \section{Kinematics}

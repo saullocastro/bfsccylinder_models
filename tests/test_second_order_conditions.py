@@ -72,7 +72,7 @@ def _run(model, ny, num_eigvals, koiter_num_modes):
 
 def _unknown_dofs(out):
     """The boundary conditions of fkoiter_cyl_SS3"""
-    x, y = out['x'], out['y']
+    x = out['x']
     bk = np.zeros(DOF*x.shape[0], dtype=bool)
     edges = np.isclose(x, 0) | np.isclose(x, L)
     #NOTE v and w with their derivatives along the edge, v,y and w,y, as
@@ -81,7 +81,8 @@ def _unknown_dofs(out):
     bk[5::DOF] = edges
     bk[6::DOF] = edges
     bk[8::DOF] = edges
-    bk[0::DOF] = np.isclose(x, L/2.) & np.isclose(y, 0)
+    #NOTE no node anchored, the axial translation being removed by the
+    #     inertia relief condition, see bfsccylinder_models/edges.py
     return ~bk
 
 
@@ -245,7 +246,9 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     T = W @ U
     assert abs(T[0, 1]) > 1e-3*np.sqrt(abs(T[0, 0]*T[1, 1]))
     for A, b in solves[-m*(m + 1)//2:]:
-        assert A.shape[0] == nu + len(koiter['ucond'])
+        #NOTE the unknowns, one row per direction of the null space, and the
+        #     inertia relief condition
+        assert A.shape[0] == nu + len(koiter['ucond']) + 1
         g = b[:nu]
         assert np.abs(U.T @ g).max() <= 1e-9*np.linalg.norm(U, axis=0).max()*np.linalg.norm(g)
     #NOTE more directions than Koiter modes, so that the rows beyond them are

@@ -60,13 +60,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
         NR_eps=1.e-4, NR_eps_accept=1.e-3,
         max_ny_nx_aspect_ratio=2, zero_offset=False,
-        c1_threshold_factor=0.01, c2_threshold_factor=0.01, edges='SS3'):
+        c1_threshold_factor=0.01, c2_threshold_factor=0.01):
 
     c1_threshold = c1_threshold_factor*L
     c2_threshold = c2_threshold_factor*L
     circ = 2*np.pi*R
     out = {}
-    out['edges'] = edges
 
     assert nxt >= 2, 'At least two nodes are required in the transition zone.'
     assert thetadeg_c1 >= 0
@@ -339,15 +338,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# finished element assembly')
 
     # applying boundary conditions
-    #NOTE u = T a, a the independent unknowns, see edges.py
-    space = edge_space(x, L, DOF, edges=edges, y=y, R=R)
-    if space.rigid is not None:
-        #NOTE inertia relief of the rigid body modes the edges leave
-        #     free, in the metric of the consistent mass matrix
-        space.set_mass(mass_matrix(elements, update_M, M_SPARSE_SIZE, N,
-                havg_elements,
-                [rho]*num_elements))
-        print('# inertia relief of', ', '.join(space.rigid_names))
+    #NOTE SS3 edges with inertia relief, no node anchored, see edges.py:
+    #     the axial translation is removed in the metric of the consistent
+    #     mass matrix, at unit density, the density being uniform, which
+    #     only scales it
+    space = edge_space(x, L, DOF)
+    space.set_mass(mass_matrix(elements, update_M, M_SPARSE_SIZE, N,
+            havg_elements, [1.]*num_elements))
 
     print('# starting static analysis')
 
@@ -392,7 +389,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
 
     # solving
-    uu = space.solve(KC0uu, space.force(fext), spsolve)
+    uu = space.solve(KC0uu, space.force(fext))
     cg_x0 = uu.copy()
 
     u0 = space.expand(uu)
@@ -412,21 +409,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     #     here, so the axial stations that mesh_order sorts the nodes into are
     #     checked before the axisymmetric basis is built on them
     assert np.all(x[axi_order] == x[axi_order][:, :1])
-    #NOTE the axial station where the axial rigid body translation is
-    #     removed, the one of the constraint that suppresses it
-    if edges == 'SS4':
-        axi_imid = 0
-    elif edges.endswith('-IR'):
-        #NOTE removed by the inertia relief condition instead
-        axi_imid = None
-    else:
-        axi_imid = np.argmin(np.abs(xlin - L/2.))
 
     Baxi, buaxi = axisymmetric_basis(axi_order, space.free, DOF)
     Caxi = space.axisymmetric_condition(Baxi, buaxi)
 
     def project_axi(u):
-        return project_axisymmetric(u, axi_order, axi_imid, DOF)
+        return project_axisymmetric(u, axi_order, DOF)
 
     def solve_axi(KT, rhs):
         """Solve KT du = rhs for the axisymmetric du
@@ -445,12 +433,8 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         #     equilibrates internally, this dense one does not. Iterates are
         #     unchanged to ten digits on ny=60, so it is a guard, not a fix
         d = 1/np.sqrt(np.abs(Krf.diagonal()))
-        if Caxi is None:
-            a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :],
-                    d*rr[buaxi])
-            return Baxi @ a
-        #NOTE the inertia relief condition as a border, the axisymmetric
-        #     rigid body modes being null vectors of Krf
+        #NOTE the inertia relief condition as a border, the axial
+        #     translation being a null vector of Krf
         Cs = np.linalg.qr(d[:, None]*Caxi)[0]
         n, k = Cs.shape
         A = np.zeros((n + k, n + k))
@@ -482,14 +466,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
-        if space.C is None:
-            eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM',
-                    M=KCuu, tol=1e-6, v0=v0)
-        else:
-            eigvals, eigvecsu = space.eigsh(KGuu, KCuu, num_eigvals, v0,
-                    1e-6, eigsh)
+        eigvals, eigvecsu = space.eigsh(KGuu, KCuu, num_eigvals, v0, 1e-6,
+                eigsh)
         mu = -1/eigvals
-        return eigvals, canonical_modes(mu, eigvecsu, space,
+        return eigvals, canonical_modes(mu, eigvecsu, space.free,
                 axi_order, DOF), mu
 
     if NLprebuck:
@@ -949,17 +929,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     nu = space.size
     W = space.force(phi20)
 
-    Cb = space.border()
-    if Cb is None:
-        bordered = bmat([[phi2uu, csc_matrix(Nsp)],
-                         [csc_matrix(W).T, None]], format='csc')
-        num_border = num_cond
-    else:
-        #NOTE and the inertia relief condition, C.T uab = 0
-        bordered = bmat([[phi2uu, csc_matrix(Nsp), csc_matrix(Cb)],
-                         [csc_matrix(W).T, None, None],
-                         [csc_matrix(Cb).T, None, None]], format='csc')
-        num_border = num_cond + Cb.shape[1]
+    #NOTE and the inertia relief condition, C.T uab = 0, as a last border
+    bordered = bmat([[phi2uu, csc_matrix(Nsp), csc_matrix(space.C)],
+                     [csc_matrix(W).T, None, None],
+                     [csc_matrix(space.C).T, None, None]], format='csc')
+    num_border = num_cond + space.C.shape[1]
 
     #NOTE cstq[i, j, k] = cst_ab[(i, j)] @ ucond[k]
     cstq = np.tensordot(cst, Ucond, axes=(0, 0))

@@ -5,8 +5,10 @@ The shell, laminate, load and mesh rule of test_Arbocz_Starnes_2002 of
 tests/test_koiter_cylinder_newton_raphson.py, von Karman (fkoiter_cyl_SS3 of
 koiter_cylinder) or Sanders (koiter_cylinder_sanders) kinematics, NLprebuck,
 one Koiter mode. Which edge condition is solved is set by the library on
-PYTHONPATH: the one of the branch, v = w = 0 along the whole edge, or an
-export of an earlier commit, v and w fixed at the edge nodes only. Both are
+PYTHONPATH: the one of the branch, v = w = 0 along the whole edge (with the
+axial translation removed by inertia relief since, which leaves lambda_c
+and b unchanged), or an export of an earlier commit, v and w fixed at the
+edge nodes only. Both are
 SS-3, the condition of the references, as the mesh is refined: ANILISA with
 rigorous nonlinear pre-buckling gives lambda_c = 0.328594 (n = 11) and
 b = -0.37605 for that mode, STAGS-A lambda_c = 0.327759.

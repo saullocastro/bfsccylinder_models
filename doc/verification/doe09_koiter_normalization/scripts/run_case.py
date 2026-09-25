@@ -4,12 +4,12 @@ pre-buckling state
 usage: python run_case.py ICASE LIN|NL [NY] [--distinct K] [--num-eigvals N]
                          [--axial-factor F] [--eps1 E] [--nint P]
                          [--kinematics sanders|donnell] [--thickness-factor T]
-                         [--nxxunit N] [--edges SS3|SS4|SS3-IR|free-IR]
+                         [--nxxunit N]
 
 NY overrides ny below, for the convergence study. The options, for the
 reassessment studies (generate_qsubs_reassess.py), override
 koiter_num_distinct, num_eigvals, axial_factor, NLprebuck_eps1, nint,
-kinematics, thickness_factor, Nxxunit and edges below, and
+kinematics, thickness_factor and Nxxunit below, and
 only when this file runs as a script, so that the globals seen by
 generate_qsubs.py are those of the DOE. The last line printed is
 "RESULT {json}", read by post.py, post_convergence.py and
@@ -50,11 +50,10 @@ if 'callable(koiter_num_modes)' not in inspect.getsource(
     raise ImportError('bfsccylinder_models at %s does not take koiter_num_modes '
             'as a callable, use the branch doe09-koiter-normalization'
             % bfsccylinder_models.__file__)
-if 'edges' not in inspect.signature(
-        model.fkoiter_cylinder_CTS_circum).parameters:
-    raise ImportError('bfsccylinder_models at %s fixes v and w at the edge '
-            'nodes only, or has no SS4 edges, use the branch '
-            'doe09-koiter-normalization' % bfsccylinder_models.__file__)
+if 'mass_matrix' not in inspect.getsource(model.fkoiter_cylinder_CTS_circum):
+    raise ImportError('bfsccylinder_models at %s has no inertia relief '
+            'edges, use the branch doe09-koiter-normalization'
+            % bfsccylinder_models.__file__)
 
 DOE_name = 'DOE09'
 DOF = 10
@@ -106,19 +105,11 @@ thickness_factor = 1.
 #     expansion point stays at lambda_b = 1 > lambda_c (thickness factor
 #     0.7 of case 6, Pcr about 2470 N against 2513 N)
 Nxxunit = 1000.
-#NOTE simply supported edges with v = w = 0 along the whole edge, v,y and
-#     w,y fixed at the edge nodes together with v and w, the only condition
-#     of the models of the branch doe09-koiter-normalization, see the check
-#     below; the runs before it fixed v and w at the edge nodes only, and
-#     their RESULT lines have no ss_edge_tangential
-ss_edge_tangential = True
-#NOTE edge condition of the model, see bfsccylinder_models/edges.py: SS3, u
-#     free, SS4, u uniform along each edge, zero at x = 0 and one shared
-#     unknown at x = L, under the same axial load, SS3-IR, SS3 with the axial
-#     translation removed by inertia relief instead of at a node, and
-#     free-IR, no edge condition, the six rigid body modes removed by inertia
-#     relief
-edges = 'SS3'
+#NOTE the edge condition of the models, the only one they have, recorded in
+#     the RESULT line: SS3 with inertia relief, v = w = 0 along both edges,
+#     the load on both edges, no node anchored, see
+#     bfsccylinder_models/edges.py
+edges = 'SS3-IR'
 #NOTE k and ncv of every call to eigsh, and the ARPACK error of a call
 #     retried with a larger ncv, see use_safe_solvers
 eigsh_calls = []
@@ -204,16 +195,15 @@ def use_distinct_modes():
             v = v - (c @ (M @ v))*c
         return v/np.sqrt(v @ (M @ v))
 
-    def distinct_first(mu, eigvecsu, space, axi_order, DOF, deg_rtol=1.e-5):
-        #NOTE space is the EdgeSpace of the model, u = T a
-        eigvecsu = canonical_modes(mu, eigvecsu, space, axi_order, DOF,
+    def distinct_first(mu, eigvecsu, bu, axi_order, DOF, deg_rtol=1.e-5):
+        eigvecsu = canonical_modes(mu, eigvecsu, bu, axi_order, DOF,
                 deg_rtol=deg_rtol)
-        bu = space.free
         basis = np.zeros((bu.shape[0], 0))
         distinct = []
         twins = []
         for k in range(eigvecsu.shape[1]):
-            phi = space.expand(eigvecsu[:, k])
+            phi = np.zeros(bu.shape[0])
+            phi[bu] = eigvecsu[:, k]
             if basis.shape[1] > 0:
                 coef = np.linalg.lstsq(basis, phi, rcond=None)[0]
                 if (np.linalg.norm(phi - basis @ coef)
@@ -254,11 +244,12 @@ def use_distinct_modes():
         #     then orthogonal to the previous columns as well
         cols, mus, used, flags = [], [], [], []
         for k in take:
-            phi = space.expand(orthonormal(eigvecsu[:, k], cols))
+            phi = np.zeros(bu.shape[0])
+            phi[bu] = orthonormal(eigvecsu[:, k], cols)
             psi = model.degenerate_partner(phi, bu, axi_order, DOF)
-            pair = [space.restrict(phi)]
+            pair = [phi[bu]]
             if psi is not None:
-                pair.append(orthonormal(space.restrict(psi), cols + pair))
+                pair.append(orthonormal(psi[bu], cols + pair))
             cols += pair
             mus += [mu[k]]*len(pair)
             used.append(k)
@@ -301,9 +292,12 @@ def use_safe_solvers():
     15 GB at ny=80 and 17.6 GB for the factorization of KCuu alone, done by
     eigsh, at ny=160, for case 0.
 
-    Here symmetric matrices are factorized with Cholesky, the others with
-    lu_gmres, eigsh uses the Cholesky factors of KCuu, and every PARDISO
-    solution is checked against its residual, SuperLU being the fallback
+    Here symmetric matrices are factorized with Cholesky, the others, the
+    bordered systems of the second order fields, with lu_gmres, and every
+    PARDISO solution is checked against its residual, SuperLU being the
+    fallback. The static solves and the inverse of KCuu in eigsh are those of
+    the inertia relief solver of the model, bfsccylinder_models.edges, which
+    uses the Cholesky factorization of PARDISO with the same check
     """
     try:
         import pypardiso
@@ -383,24 +377,10 @@ def use_safe_solvers():
             return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
                     tol=tol, v0=v0, ncv=call['ncv'], **kwargs)
 
-    def eigsh(A, k, which, M, tol, v0, Minv=None):
-        #NOTE the inertia relief edges give the inverse of M on the null
-        #     space of their condition, M being singular, see edges.py
-        if Minv is not None:
-            return arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol,
-                    v0=v0)
-        solver, Mu = cholesky(M)
-        Minv = scipy.sparse.linalg.LinearOperator(M.shape, dtype=np.float64,
-                matvec=lambda x: solver.solve(Mu, np.ascontiguousarray(x)))
-        x = solver.solve(Mu, v0)
-        if residual(M, x, v0) > max_residual:
-            solver.free_memory(everything=True)
-            print('# WARNING: PARDISO Cholesky residual %.1e in eigsh, using '
-                    'SuperLU' % residual(M, x, v0))
-            return arpack(A=A, k=k, which=which, M=M, tol=tol, v0=v0)
-        out = arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol, v0=v0)
-        solver.free_memory(everything=True)
-        return out
+    def eigsh(A, k, which, M, tol, v0, Minv):
+        #NOTE the model gives the inverse of M on the null space of the
+        #     inertia relief condition, M being singular, see edges.py
+        return arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol, v0=v0)
 
     model.spsolve = spsolve
     model.eigsh = eigsh
@@ -525,8 +505,7 @@ def design_function(variables, constants):
             mesh_only=mesh_only, Nxxunit=Nxxunit,
             num_eigvals=num_eigvals, koiter_num_modes=koiter_num_modes,
             NLprebuck=NLprebuck, NLprebuck_eps1=NLprebuck_eps1,
-            max_ny_nx_aspect_ratio=max_ny_nx_aspect_ratio, nint=nint,
-            edges=edges)
+            max_ny_nx_aspect_ratio=max_ny_nx_aspect_ratio, nint=nint)
     out['nxt'] = nxt
     out['max_ny_nx_aspect_ratio'] = max_ny_nx_aspect_ratio
     return out
@@ -771,9 +750,6 @@ if __name__ == '__main__':
             help='factor on tow_thick, default %(default)s')
     parser.add_argument('--nxxunit', type=float, default=Nxxunit,
             help='load unit in N/m, default %(default)s')
-    parser.add_argument('--edges', choices=['SS3', 'SS4', 'SS3-IR', 'free-IR'],
-            default=edges,
-            help='edge condition, default %(default)s')
     args = parser.parse_args()
     icase = args.icase
     NLprebuck = dict(LIN=False, NL=True)[args.prebuck]
@@ -792,7 +768,6 @@ if __name__ == '__main__':
     kinematics = args.kinematics
     thickness_factor = args.thickness_factor
     Nxxunit = args.nxxunit
-    edges = args.edges
     if kinematics == 'donnell':
         #NOTE before use_safe_solvers and the others, which patch the
         #     functions of model; ElementField keeps BFSCCylinderSanders,
@@ -839,8 +814,7 @@ if __name__ == '__main__':
                   num_eigvals=num_eigvals, axial_factor=axial_factor,
                   NLprebuck_eps1=NLprebuck_eps1, nint=nint,
                   kinematics=kinematics, thickness_factor=thickness_factor,
-                  Nxxunit=Nxxunit, ss_edge_tangential=ss_edge_tangential,
-                  edges=edges,
+                  Nxxunit=Nxxunit, edges=edges,
                   eigsh_calls=eigsh_calls)
     t0 = time.time()
     try:

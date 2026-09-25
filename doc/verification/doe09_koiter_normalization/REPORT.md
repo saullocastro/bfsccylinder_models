@@ -17,33 +17,34 @@ They were run on the SS3 edges anchored at one node, most of them with v
 and w fixed at the edge nodes only; git history keeps them (up to commit
 `1fc65e2`).
 
-The study is restarted from a low ny on the inertia relief edges of
-`bfsccylinder_models/edges.py` (commit `1fc65e2`), with the axial load on
-both edges and no node anchored:
+The study is restarted from a low ny on the edges that every model of the
+library now has, **SS3-IR** (`bfsccylinder_models/edges.py`): v = w = 0
+along both edges, the axial load on both edges, no node anchored, the axial
+translation removed by inertia relief (mass-weighted mean axial
+displacement zero). It gives the results of the SS3 edges anchored at one
+node to round off, 1e-12 in Pcr and 5e-9 in b_1111 on the Waters shell, the
+translation being a null vector of every operator.
 
-- **SS3-IR**: v = w = 0 along both edges, the axial translation removed by
-  inertia relief (mass-weighted mean axial displacement zero). It gives the
-  SS3 results to round off, 1e-12 in Pcr and 5e-9 in b_1111 on the Waters
-  shell, the axial translation being a null vector of every operator.
-- **free-IR**: no edge condition, all six rigid body modes removed by
-  inertia relief. The lowest buckling modes are the n = 2 to 6 ovalizations
-  of the free edges, at a small fraction of the SS3-IR load (case 6 at
-  ny = 40: 1039 N against 6989 N).
+The first 162 runs were made with free edges as well, **free-IR**: no edge
+condition, all six rigid body modes removed by inertia relief. That option
+was removed from the models afterwards (it is in git history up to commit
+`1fc65e2`), for the reason of finding 5 below.
 
 [`scripts/generate_qsubs_convergence.py`](scripts/generate_qsubs_convergence.py):
-cases 0, 1 and 6, NL, eps1 = 0.0005, both edge conditions, ny = 24, 32, 40,
-48, 64, 80, 96, 120 and 160, and axial factors F = 0.5, 1 and 2 (largest
-axial element length dy/F: elements twice as long axially, square, half as
-long), 162 runs. Tables:
-[`checks/convergence_post.py`](checks/convergence_post.py), results in
-`results/DOE09_conv_ir.jsonl.gz` once the runs are done.
+cases 0, 1 and 6, NL, eps1 = 0.0005, ny = 24, 32, 40, 48, 64, 80, 96, 120
+and 160, and axial factors F = 0.5, 1 and 2 (largest axial element length
+dy/F: elements twice as long axially, square, half as long), then ny = 200
+and 240 at F = 2 and F = 3 at ny = 120 and 160; 93 SS3-IR runs. Tables:
+[`checks/convergence_post.py`](checks/convergence_post.py), results of the
+SS3-IR runs in `results/DOE09_conv_ir.jsonl.gz`.
 
 The sections below describe the method (normalization, mode set, crest);
 the ny quoted in them locate their evidence, not a mesh recommendation.
 
-### Results of the first 162 runs (2026-09-25)
+### Results of the first runs (2026-09-25)
 
-All 162 runs finished, none with an error. Tables below; b_min_t is that of
+All 162 runs, 81 SS3-IR and 81 free-IR, finished, none with an error.
+Tables of the SS3-IR runs below; b_min_t is that of
 the full Koiter set (at least 5 distinct modes, complete clusters), crit b_t
 that of the critical cluster alone, m the number of Koiter modes.
 
@@ -80,7 +81,8 @@ that of the critical cluster alone, m the number of Koiter modes.
    within 0.7 %, b is not**: 2.4-3.2 % for case 0, about 12 % for case 6,
    unknown for case 1. SS3-IR is being extended to ny = 200 and 240 at
    F = 2, and to F = 3 at ny = 120 and 160 (12 runs, submitted 2026-09-25).
-5. **free-IR does not converge to a buckling load of the shell.** Every run
+5. **free-IR does not converge to a buckling load of the shell**, and was
+   removed from the models for that reason. Every run
    buckles at n = 2, the ovalization of the free edges, and Pcr falls with
    every refinement: case 0 from 905 N at ny = 24 to 95 N at ny = 160 (F =
    2), Richardson order about 2 towards roughly 80 N; case 1 to 564 N; case
@@ -92,8 +94,8 @@ that of the critical cluster alone, m the number of Koiter modes.
 6. The combined fit f = f_inf + a/ny^p + c/nx^q of `convergence_post.py` is
    not reliable yet: over the 6 meshes of case 0 with ny/n_c >= 4 it has as
    many data as parameters; for case 1 the nx = 67 meshes, which miss the
-   critical mode, spoil it; for case 6 the F = 0.5 meshes do. It will be
-   repeated with the extension, on F >= 1 only.
+   critical mode, spoil it; for case 6 the F = 0.5 meshes do. It is repeated
+   in the Extension over F >= 2, the default of `convergence_post.py` since.
 
 **SS3-IR, case 0**
 
@@ -214,126 +216,6 @@ Richardson in ny over the last three meshes of each F:
 | 0.5 | 96-120-160 | p 3.2, 4712.8, +3.7 % | p 0.4, -1.5966, +60.7 % | p 3.6, -0.80544, +7.0 % |
 | 1 | 96-120-160 | p 13.0, 4552.2, +0.0 % | not monotone | not monotone |
 | 2 | 96-120-160 | p 3.7, 4496.5, +0.5 % | p 2.1, -0.24816, +12.1 % | p 2.0, -0.3452, +12.7 % |
-
-**free-IR, case 0**
-
-| F | ny | nx | n_c | Pcr (N) | b_min_t |
-|---|---|---|---|---|---|
-| 0.5 | 24 | 51 | 2 | 904.8 | -0.0003113 |
-| 0.5 | 32 | 61 | 2 | 492.6 | -6.896e-05 |
-| 0.5 | 40 | 61 | 2 | 356.7 | -5.405e-05 |
-| 0.5 | 48 | 71 | 2 | 263.4 | -1.945e-05 |
-| 0.5 | 64 | 81 | 2 | 183.6 | -8.749e-06 |
-| 0.5 | 80 | 91 | 2 | 146.4 | -3.808e-06 |
-| 0.5 | 96 | 111 | 2 | 124.2 | -2.192e-06 |
-| 0.5 | 120 | 121 | 2 | 109.5 | -2.124e-06 |
-| 0.5 | 160 | 161 | 2 | 96.6 | -74.48 |
-| 1 | 24 | 51 | 2 | 904.8 | -0.0003113 |
-| 1 | 32 | 61 | 2 | 492.6 | -6.896e-05 |
-| 1 | 40 | 61 | 2 | 356.7 | -5.405e-05 |
-| 1 | 48 | 71 | 2 | 263.4 | -1.945e-05 |
-| 1 | 64 | 81 | 2 | 183.6 | -8.749e-06 |
-| 1 | 80 | 91 | 2 | 146.4 | -3.808e-06 |
-| 1 | 96 | 111 | 2 | 124.2 | -2.192e-06 |
-| 1 | 120 | 121 | 2 | 109.5 | -2.124e-06 |
-| 1 | 160 | 161 | 2 | 96.6 | -74.48 |
-| 2 | 24 | 61 | 2 | 815.9 | -0.0001123 |
-| 2 | 32 | 71 | 2 | 471.1 | -3.141e-05 |
-| 2 | 40 | 81 | 2 | 322.4 | -1.29e-05 |
-| 2 | 48 | 91 | 2 | 245.0 | -7.421e-06 |
-| 2 | 64 | 111 | 2 | 171.2 | -3.272e-06 |
-| 2 | 80 | 121 | 2 | 139.2 | -2.08e-06 |
-| 2 | 96 | 141 | 2 | 121.1 | -1.666e-06 |
-| 2 | 120 | 171 | 2 | 106.6 | -1.678e-06 |
-| 2 | 160 | 221 | 2 | 95.5 | -1.799e-06 |
-
-Richardson in ny over the last three meshes of each F:
-
-| F | meshes | Pcr: order, extrapolated, error at the finest | b_min_t: same | crit b_t: same |
-|---|---|---|---|---|
-| 0.5 | 96-120-160 | p 1.5, 73.618, +31.3 % | not monotone | not monotone |
-| 1 | 96-120-160 | p 1.5, 73.618, +31.3 % | not monotone | not monotone |
-| 2 | 96-120-160 | p 2.1, 81.688, +16.9 % | not monotone | not monotone |
-
-**free-IR, case 1**
-
-| F | ny | nx | n_c | Pcr (N) | b_min_t |
-|---|---|---|---|---|---|
-| 0.5 | 24 | 39 | 2 | 5274.6 | -0.0006864 |
-| 0.5 | 32 | 43 | 2 | 3122.9 | -0.2804 |
-| 0.5 | 40 | 47 | 2 | 2320.4 | -5.099e-05 |
-| 0.5 | 48 | 51 | 2 | 1760.3 | -2.698e-05 |
-| 0.5 | 64 | 59 | 2 | 1225.5 | -0.0002059 |
-| 0.5 | 80 | 67 | 2 | 986.8 | -0.003294 |
-| 0.5 | 96 | 67 | 2 | 932.2 | -0.00216 |
-| 0.5 | 120 | 67 | 2 | 887.7 | -26.02 |
-| 0.5 | 160 | 67 | 2 | 853.2 | -0.05282 |
-| 1 | 24 | 39 | 2 | 5274.6 | -0.0006864 |
-| 1 | 32 | 43 | 2 | 3122.9 | -0.2804 |
-| 1 | 40 | 47 | 2 | 2320.4 | -5.099e-05 |
-| 1 | 48 | 51 | 2 | 1760.3 | -2.698e-05 |
-| 1 | 64 | 59 | 2 | 1225.5 | -0.0002059 |
-| 1 | 80 | 67 | 2 | 986.8 | -0.003294 |
-| 1 | 96 | 67 | 2 | 932.2 | -0.00216 |
-| 1 | 120 | 127 | 2 | 634.9 | -0.7911 |
-| 1 | 160 | 127 | 2 | 599.9 | -0.0001231 |
-| 2 | 24 | 43 | 2 | 4023.7 | -0.07739 |
-| 2 | 32 | 51 | 2 | 2422.2 | -0.08402 |
-| 2 | 40 | 55 | 2 | 1796.5 | -2.755e-05 |
-| 2 | 48 | 67 | 2 | 1313.3 | -0.0001509 |
-| 2 | 64 | 127 | 2 | 839.9 | -0.001237 |
-| 2 | 80 | 127 | 2 | 735.9 | -0.04892 |
-| 2 | 96 | 127 | 2 | 680.1 | -44.63 |
-| 2 | 120 | 169 | 2 | 598.6 | -950.6 |
-| 2 | 160 | 169 | 2 | 563.5 | -81.93 |
-
-Richardson in ny over the last three meshes of each F:
-
-| F | meshes | Pcr: order, extrapolated, error at the finest | b_min_t: same | crit b_t: same |
-|---|---|---|---|---|
-| 0.5 | 96-120-160 | p 2.0, 809.17, +5.4 % | not monotone | p 1.6, 1.5298e-05, -38.4 % |
-| 1 | 96-120-160 | p 9.8, 597.75, +0.4 % | not monotone | p 12.5, 1.8029e-05, -0.2 % |
-| 2 | 96-120-160 | p 4.4, 549.72, +2.5 % | not monotone | not monotone |
-
-**free-IR, case 6**
-
-| F | ny | nx | n_c | Pcr (N) | b_min_t |
-|---|---|---|---|---|---|
-| 0.5 | 24 | 17 | 2 | 2724.1 | -0.01449 |
-| 0.5 | 32 | 17 | 2 | 2263.6 | -0.0003604 |
-| 0.5 | 40 | 17 | 2 | 2004.6 | -0.0003281 |
-| 0.5 | 48 | 17 | 2 | 1865.9 | -0.0002674 |
-| 0.5 | 64 | 17 | 2 | 1727.4 | -0.0001928 |
-| 0.5 | 80 | 25 | 2 | 911.9 | -7.617e-05 |
-| 0.5 | 96 | 25 | 2 | 872.9 | -0.03404 |
-| 0.5 | 120 | 33 | 2 | 556.0 | -1.63e-05 |
-| 0.5 | 160 | 41 | 2 | 390.3 | -122.7 |
-| 1 | 24 | 17 | 2 | 2724.1 | -0.01449 |
-| 1 | 32 | 17 | 2 | 2263.6 | -0.0003604 |
-| 1 | 40 | 25 | 2 | 1302.4 | -0.0001757 |
-| 1 | 48 | 25 | 2 | 1141.6 | -0.0001486 |
-| 1 | 64 | 33 | 2 | 705.0 | -5.545e-05 |
-| 1 | 80 | 41 | 2 | 491.6 | -2.124e-05 |
-| 1 | 96 | 49 | 2 | 375.3 | -0.0002286 |
-| 1 | 120 | 65 | 2 | 268.3 | -25.37 |
-| 1 | 160 | 81 | 2 | 207.3 | -3.514 |
-| 2 | 24 | 25 | 2 | 2335.2 | -0.0002396 |
-| 2 | 32 | 33 | 2 | 1365.0 | -0.0001325 |
-| 2 | 40 | 41 | 2 | 911.3 | -6.866e-05 |
-| 2 | 48 | 49 | 2 | 665.8 | -3.428e-05 |
-| 2 | 64 | 65 | 2 | 423.7 | -0.0002284 |
-| 2 | 80 | 81 | 2 | 311.4 | -0.000211 |
-| 2 | 96 | 97 | 2 | 250.3 | -2.655e-06 |
-| 2 | 120 | 121 | 2 | 200.4 | -3.433 |
-| 2 | 160 | 161 | 2 | 161.6 | -1.914 |
-
-Richardson in ny over the last three meshes of each F:
-
-| F | meshes | Pcr: order, extrapolated, error at the finest | b_min_t: same | crit b_t: same |
-|---|---|---|---|---|
-| 0.5 | 96-120-160 | p 3.6, 299.32, +30.4 % | not monotone | not monotone |
-| 1 | 96-120-160 | p 3.3, 168.04, +23.4 % | not monotone | not monotone |
-| 2 | 96-120-160 | p 2.0, 111.91, +44.4 % | not monotone | p 1.8, -1.684, +40.1 % |
 
 ### Extension: SS3-IR at ny = 200 and 240, and F = 3 (2026-09-25)
 
@@ -652,9 +534,10 @@ ny = 200, 57 min.
 Open. From the restarted convergence study (Sections *Results of the first
 162 runs* and *Extension*):
 
-- **Edge condition: SS3-IR.** free-IR does not converge to a buckling load
-  of the shell (free-edge ovalization at 2.5-6.3 % of the SS3-IR load, still
-  falling with the mesh). SS3-IR gives the SS3 results.
+- **Edge condition: SS3-IR**, the only one of the models since: free-IR
+  does not converge to a buckling load of the shell (free-edge ovalization
+  at 2.5-6.3 % of the SS3-IR load, still falling with the mesh), and SS3-IR
+  gives the SS3 results.
 - **Axial mesh: F = 2**, dx max = dy/2. Elements longer axially than around
   are worse (case 6 at F = 0.5), and F = 3 changes b by 0.1-1.5 % only.
 - **Quantity:** b of the critical cluster converges regularly; b_min_t of
@@ -702,7 +585,8 @@ Reported, not changed; both are worked around in `run_case.py`:
     `pair_rotation` and `orbit_crest` (largest crest over the rotations within
     one element), crest_e_min, rotation_error, and crest_method =
     'element_orbit', which `generate_qsubs.py` and `post.py` require of an
-    output; since `1fc65e2`, `--edges SS3|SS4|SS3-IR|free-IR`.
+    output; the edge condition of the models, SS3-IR, as `edges` in the
+    RESULT line.
 - `koiter_post.py`: `rescaled`, `energy_scales`, `symmetrized`,
   `min_direction`.
 - `post.py`: `DOE09_koiter.npz` with the nodal b_ijkl and a_ijk of the 10
