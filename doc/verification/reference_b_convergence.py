@@ -171,7 +171,7 @@ def main(ny, nx, eps1=0.005, rot_deg=0., case='arbocz', sanders=False,
     model.canonical_modes = modes
     t0 = time.time()
     try:
-        out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+        out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
                 num_eigvals=2, koiter_num_modes=1, Nxxunit=Nxxunit,
                 NLprebuck=not linear, NLprebuck_eps1=eps1,
                 NLprebuck_maxiter=30)

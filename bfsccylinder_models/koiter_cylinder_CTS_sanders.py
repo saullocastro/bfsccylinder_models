@@ -54,7 +54,7 @@ def nonlinear_rows(elem, xi, eta):
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         h_tow, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
-        ny_nx_aspect_ratio=1, cg_x0=None,
+        ny_nx_aspect_ratio=1,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
         NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
@@ -390,7 +390,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
 
     # solving
     uu = space.solve(KC0uu, space.force(fext))
-    cg_x0 = uu.copy()
 
     u0 = space.expand(uu)
 
@@ -454,8 +453,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             update_KG(u, elem, points, weights, KGr, KGc, KGv)
         return coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
 
-    def solve_eig(KCuu, KGuu):
+    def solve_eig(KCuu, KGuu, mu_est=None):
         """Buckling multipliers of the stress state currently stored in KG
+
+        mu_est, an estimate of the smallest multiplier, lets the eigen solver
+        work in shift-invert mode just below it, see EdgeSpace.eigsh
 
         The starting vector is fixed on purpose. ARPACK keeps its random seed
         in a SAVEd variable, so without one the basis it returns for a
@@ -467,7 +469,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
         eigvals, eigvecsu = space.eigsh(KGuu, KCuu, num_eigvals, v0, 1e-6,
-                eigsh)
+                eigsh, mu_est=mu_est)
         mu = -1/eigvals
         return eigvals, canonical_modes(mu, eigvecsu, space.free,
                 axi_order, DOF), mu
@@ -607,7 +609,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         for iteration in range(1, NLprebuck_maxiter+1):
             KCuu = space.matrix(KC)
             KGuu = space.matrix(KG)
-            eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
+            #NOTE the buckling load of the previous iteration, as a multiplier
+            #     of the present load level, for the shift of the eigen solver
+            mu_est = None if iteration == 1 else lambda_c/lambda_b
+            eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu, mu_est)
             lambda_c = lambda_b*mu[0] # Eq. (46)
             print('#    iteration', iteration, 'lambda_b', lambda_b,
                     'lambda_c', lambda_c, 'lambda_b/lambda_c',
@@ -742,7 +747,6 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# critical buckling load', Pcr)
 
     out['Pcr'] = Pcr
-    out['cg_x0'] = cg_x0
     out['eigvals'] = eigvals
     out['load_mult'] = load_mult
     out['lambda_b'] = lambda_b

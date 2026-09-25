@@ -39,7 +39,7 @@ def test_Sun_et_al():
     plyt = h/len(stack)
     Nxxunit = 20000. # N/m
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt)
-    out = fkoiter_cyl_SS3_sanders(L, R, nx, ny, prop, cg_x0=None, nint=4,
+    out = fkoiter_cyl_SS3_sanders(L, R, nx, ny, prop, nint=4,
             num_eigvals=4, koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=True)
     print(out['eigvals'])
     #NOTE reference buckling load of Eq. (47), a membrane stress resultant, such
@@ -105,7 +105,7 @@ def test_Arbocz_Starnes_2002():
     laminaprop = (E11, E22, nu12, G12, G12, G12)
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt)
     Nxxunit = 10000. # N/m
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
             num_eigvals=2, koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=True)
     #NOTE normalizing stress resultant Ncl = E h**2/(c R), with
     #     c = sqrt(3(1 - nu12**2)), equal to the -2238.325 lb/in used to

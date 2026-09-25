@@ -110,6 +110,49 @@ def test_Waters_shell():
             assert np.abs(U[edges][:, [3, 5, 6, 8]]).max() == 0
 
 
+def test_shift_invert_eigsh(monkeypatch):
+    """The multipliers of EdgeSpace.eigsh in shift-invert mode are the
+    smallest ones, degenerate pairs complete, also when the estimate is above
+    the critical multiplier and the shift has to be lowered; the modes stay
+    in the null space of the inertia relief condition"""
+    import bfsccylinder_models.edges as edges
+    from scipy.sparse.linalg import eigsh
+    saved = {}
+    eigsh_space = edges.EdgeSpace.eigsh
+
+    def keep(self, KG, KC, k, v0, tol, eig, mu_est=None, **kwargs):
+        saved.update(space=self, KG=KG, KC=KC, v0=v0)
+        return eigsh_space(self, KG, KC, k, v0, tol, eig, mu_est=mu_est,
+                           **kwargs)
+
+    monkeypatch.setattr(edges.EdgeSpace, 'eigsh', keep)
+    ny = 24
+    nx, prop = _waters(ny)
+    fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=4, koiter_num_modes=0,
+            Nxxunit=1000.)
+    space, KG, KC, v0 = (saved[k] for k in ('space', 'KG', 'KC', 'v0'))
+    #NOTE the dense solution on the null space of C.T. Either mode may
+    #     return one member of a degenerate pair only, as decided by round
+    #     off, which the models make up for, see canonical_modes; what is
+    #     checked is that every multiplier returned is one of the spectrum,
+    #     the first being the critical one
+    import scipy.linalg
+    Z = scipy.linalg.null_space(space.C.T)
+    theta = scipy.linalg.eigh(Z.T @ (KG @ Z), Z.T @ (KC @ Z),
+                              eigvals_only=True)
+    spectrum = np.sort(-1/theta[theta < 0])
+    for estimate in (1.02*spectrum[0], 3*spectrum[0]):
+        theta_s, q = eigsh_space(space, KG, KC, 4, v0, 1e-8, eigsh,
+                                 mu_est=estimate)
+        mu = np.sort(-1/theta_s)
+        assert np.isclose(mu[0], spectrum[0], rtol=1e-8)
+        gap = np.abs(mu[:, None] - spectrum[None, :]).min(axis=1)
+        assert gap.max() <= 1e-8*spectrum[0]
+        assert np.abs(space.C[:, 0] @ q).max() <= 1e-10*np.abs(q).max()
+        res = np.linalg.norm(KG @ q - (KC @ q)*theta_s, axis=0)
+        assert res.max() <= 1e-6*np.linalg.norm(KG @ q, axis=0).max()
+
+
 def test_linbuck_against_koiter_cylinder():
     """flinBuck_VAFW with a constant laminate is the linear buckling
     analysis of koiter_cylinder.fkoiter_cyl_SS3, same element and edges"""

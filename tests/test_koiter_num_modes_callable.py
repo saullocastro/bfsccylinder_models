@@ -38,7 +38,7 @@ def ss3(koiter_num_modes, NLprebuck):
     prop = laminated_plate(stack=[45, -45],
             laminaprop=(E11, E22, nu12, G12, G12, G12), plyt=tow_thick,
             offset=tow_thick, rho=rho)
-    return fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, num_eigvals=5,
+    return fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=5,
             koiter_num_modes=koiter_num_modes, Nxxunit=1., NLprebuck=NLprebuck)
 
 

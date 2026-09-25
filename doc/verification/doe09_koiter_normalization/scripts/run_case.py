@@ -377,10 +377,11 @@ def use_safe_solvers():
             return scipy.sparse.linalg.eigsh(A=A, k=k, which=which, M=M,
                     tol=tol, v0=v0, ncv=call['ncv'], **kwargs)
 
-    def eigsh(A, k, which, M, tol, v0, Minv):
-        #NOTE the model gives the inverse of M on the null space of the
-        #     inertia relief condition, M being singular, see edges.py
-        return arpack(A=A, k=k, which=which, M=M, Minv=Minv, tol=tol, v0=v0)
+    def eigsh(A, k, which, M, tol, v0, **kwargs):
+        #NOTE the model gives the inverse, Minv, or the shifted inverse,
+        #     sigma and OPinv, on the null space of the inertia relief
+        #     condition, M being singular, see edges.py
+        return arpack(A=A, k=k, which=which, M=M, tol=tol, v0=v0, **kwargs)
 
     model.spsolve = spsolve
     model.eigsh = eigsh

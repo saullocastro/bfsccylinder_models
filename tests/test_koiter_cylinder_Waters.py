@@ -31,7 +31,7 @@ def test_Waters_shell():
     laminaprop = (E11, E22, nu12, G12, G12, G12)
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt,
             offset=0, rho=rho)
-    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, num_eigvals=2,
+    out = fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=2,
             koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=NLprebuck)
 
     b_1111 = out['koiter']['b_ijkl'][(0, 0, 0, 0)]

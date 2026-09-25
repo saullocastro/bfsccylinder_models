@@ -53,7 +53,7 @@ def sun():
     nx = int(ny*L/(2*np.pi*R))
     nx += 1 - nx % 2
     out, _ = quiet(sa_model.fkoiter_cyl_SS3, L, R, nx, ny, prop(),
-                   cg_x0=None, nint=4, num_eigvals=4, koiter_num_modes=1,
+                   nint=4, num_eigvals=4, koiter_num_modes=1,
                    Nxxunit=20000., NLprebuck=True)
     print('RESULT %.17g %.17g' % (out['koiter']['b_ijkl'][(0, 0, 0, 0)],
                                   out['load_mult'][0]))
@@ -64,7 +64,7 @@ def arbocz(ny=60):
     nx = int(1.5*ny*L/(2*np.pi*R))
     nx += 1 - nx % 2
     out, log = quiet(vk_model.fkoiter_cyl_SS3, L, R, nx, ny, prop(),
-                     cg_x0=None, nint=4, num_eigvals=2, koiter_num_modes=1,
+                     nint=4, num_eigvals=2, koiter_num_modes=1,
                      Nxxunit=10000., NLprebuck=True)
     nsp = int(re.search(r'deflated with (\d+) vectors', log).group(1))
     return out['koiter']['b_ijkl'][(0, 0, 0, 0)], out['mu'], nsp

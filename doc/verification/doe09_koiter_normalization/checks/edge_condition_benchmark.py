@@ -50,7 +50,7 @@ Nxxunit = 10000.
 model = fkoiter_cyl_SS3_sanders if sanders else fkoiter_cyl_SS3
 #NOTE eps1 = 0.0005 as the reassessment runs, so that the expansion point
 #     is the same for both edge conditions
-out = model(L, R, nx, ny, prop, cg_x0=None, nint=4, num_eigvals=4,
+out = model(L, R, nx, ny, prop, nint=4, num_eigvals=4,
             koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=True,
             NLprebuck_eps1=0.0005)
 ref = E11*h**2/(R*np.sqrt(3*(1 - nu12**2)))

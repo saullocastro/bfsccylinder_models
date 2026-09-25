@@ -65,7 +65,7 @@ def _run(model, ny, num_eigvals, koiter_num_modes):
     nx = int(ny*L/(2*np.pi*R))
     if nx % 2 == 0:
         nx += 1
-    return model.fkoiter_cyl_SS3(L, R, nx, ny, _prop(), cg_x0=None, nint=4,
+    return model.fkoiter_cyl_SS3(L, R, nx, ny, _prop(), nint=4,
             num_eigvals=num_eigvals, koiter_num_modes=koiter_num_modes,
             Nxxunit=20000., NLprebuck=True)
 

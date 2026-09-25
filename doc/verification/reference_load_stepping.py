@@ -136,7 +136,7 @@ def run(tag, model, lib, element, R, Nxxunit, ny, fx, num_eigvals, koiter):
     log = io.StringIO()
     try:
         with contextlib.redirect_stdout(log):
-            out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None,
+            out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop,
                     nint=4, num_eigvals=num_eigvals,
                     koiter_num_modes=1 if koiter else 0, Nxxunit=Nxxunit,
                     NLprebuck=True)

@@ -152,6 +152,30 @@ linear and the nonlinear pre-buckling state); the displacements differ by a
 rigid translation.  \texttt{linbuck\_VAFW.py}, displacement controlled with
 clamped edges before, has the same edges and load since.
 
+Linear solvers (\texttt{edges.py}).  Every static and buckling solve goes
+through the constrained solver of the inertia relief.  Its factorization is
+the Cholesky one of PARDISO (SuperLU without pypardiso) of the symmetrically
+scaled matrix $\boldsymbol{D}\boldsymbol{K}\boldsymbol{D}$,
+$\boldsymbol{D} = \operatorname{diag}(\boldsymbol{K})^{-1/2}$, which brings
+the diagonal, spanning 12 orders of magnitude between nodal displacements
+and nodal derivatives, to one, with iterative refinement of every solve;
+and it fails, instead of returning a wrong factor, when the matrix is not
+positive definite.  The buckling analyses of the nonlinear pre-buckling
+algorithm after the first work in shift-invert mode about $\sigma = 0.9\,
+\mu_{est}$, $\mu_{est}$ the critical multiplier of the previous load step
+scaled to the present one: the operator is the inverse of
+$\boldsymbol{K}_C + \sigma\boldsymbol{K}_G$, whose Cholesky factorization
+succeeds only when no multiplier lies below $\sigma$ (otherwise $\sigma$ is
+lowered), so that the analysis cannot miss one, and which separates the
+near critical cluster about ten times better than the unshifted operator.
+ARPACK's inner product there is $\boldsymbol{K}_C + \rho\,\boldsymbol{C}
+\boldsymbol{C}^T$, positive definite and equal to $\boldsymbol{K}_C$ on the
+null space of $\boldsymbol{C}^T$: with $\boldsymbol{K}_C$ itself, singular
+along the translation, the round off drove the Ritz vectors out of that
+null space.  On DOE09 case 6 at $n_y = 80$ (NL, 14 buckling analyses) the
+constrained solves fall from 5354 to 2250 and their time from 145 to 67 s,
+the buckling load being unchanged to $10^{-14}$.
+
 Two other supports were implemented and removed again (git history up to
 commit \texttt{1fc65e2}).  SS-4, $u$ uniform along each edge, raised the
 buckling load by 1 to 6 per cent and moved $b$ by 11 to 27 per cent on the

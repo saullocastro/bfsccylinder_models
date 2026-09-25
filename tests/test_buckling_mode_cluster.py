@@ -51,7 +51,7 @@ def _run(ny, num_eigvals, NLprebuck):
     prop = laminated_plate(stack=STACK,
                            laminaprop=(E11, E22, nu12, G12, G12, G12),
                            plyt=H/len(STACK))
-    return fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+    return fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
                            num_eigvals=num_eigvals, koiter_num_modes=0,
                            Nxxunit=20000., NLprebuck=NLprebuck)
 

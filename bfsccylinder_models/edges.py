@@ -28,10 +28,12 @@ coefficients are those of the same edges with u fixed at one node, to round
 off; the displacements differ from them by a rigid translation.
 
 """
+import warnings
+
 import numpy as np
 from numpy import isclose
 import scipy.linalg
-from scipy.sparse import csc_matrix, coo_matrix, triu
+from scipy.sparse import csc_matrix, coo_matrix, triu, diags
 from scipy.sparse.linalg import LinearOperator, splu
 
 
@@ -51,15 +53,33 @@ def mass_matrix(elements, update_M, M_SPARSE_SIZE, N, h, rho):
     return coo_matrix((Mv, (Mr, Mc)), shape=(N, N)).tocsc()
 
 
-class Factor:
-    """Factorization of a sparse symmetric positive definite matrix
+class NotPositiveDefinite(ValueError):
+    """The matrix given to :class:`Factor` is not positive definite"""
 
-    The Cholesky factorization of PARDISO when pypardiso is installed,
-    checked against the residual of a solve, SuperLU otherwise or when the
-    residual is above 1e-8
+
+class Factor:
+    """Factorization of a sparse symmetric positive definite matrix A
+
+    The symmetric diagonal scaling ``D A D``, ``D = diag(A)**-1/2``, is
+    factorized, which brings the diagonal of these stiffness matrices, whose
+    nodal displacements and nodal derivatives span about 12 orders of
+    magnitude, to one; then every solve is refined, ``x += D (DAD)^-1 D
+    (b - A x)``, until the relative residual is below ``rtol`` or stops
+    decreasing. The Cholesky factorization of PARDISO when pypardiso is
+    installed, SuperLU otherwise, in symmetric mode and without row
+    interchanges, so that both detect a matrix that is not positive definite
+    and raise :class:`NotPositiveDefinite`.
     """
-    def __init__(self, A):
+    def __init__(self, A, rtol=1.e-10, max_refine=3):
         A = csc_matrix(A)
+        diag = A.diagonal()
+        if not np.all(diag > 0):
+            raise NotPositiveDefinite('non-positive diagonal')
+        self.A = A
+        self.d = 1/np.sqrt(diag)
+        D = diags(self.d)
+        As = (D @ A @ D).tocsc()
+        self.rtol, self.max_refine = rtol, max_refine
         self.pardiso = None
         try:
             import pypardiso
@@ -67,23 +87,45 @@ class Factor:
             pypardiso = None
         if pypardiso is not None:
             solver = pypardiso.PyPardisoSolver(mtype=2)
-            Au = triu(A, format='csr')
-            solver.factorize(Au)
+            Au = triu(As, format='csr')
+            try:
+                solver.factorize(Au)
+            except pypardiso.pardiso_wrapper.PyPardisoError as e:
+                solver.free_memory(everything=True)
+                raise NotPositiveDefinite(str(e))
             self.pardiso = (solver, Au)
-            b = np.random.default_rng(0).random(A.shape[0])
-            res = np.linalg.norm(A @ self.solve(b) - b)/np.linalg.norm(b)
-            if res <= 1.e-8:
-                return
-            print('# WARNING: PARDISO Cholesky residual %.1e, using SuperLU'
-                  % res)
-            self.free()
-        self.lu = splu(A)
+            return
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            lu = splu(As, permc_spec='MMD_AT_PLUS_A', diag_pivot_thresh=0.,
+                      options=dict(SymmetricMode=True))
+        if (not np.array_equal(lu.perm_r, lu.perm_c)
+                or not np.all(lu.U.diagonal() > 0)):
+            raise NotPositiveDefinite('negative pivot')
+        self.lu = lu
 
-    def solve(self, b):
+    def _solve_scaled(self, b):
         if self.pardiso is not None:
             solver, Au = self.pardiso
             return solver.solve(Au, np.ascontiguousarray(b))
         return self.lu.solve(b)
+
+    def solve(self, b):
+        d = self.d if np.ndim(b) == 1 else self.d[:, None]
+        x = d*self._solve_scaled(d*b)
+        norm_b = np.linalg.norm(b)
+        if norm_b == 0:
+            return x
+        res = np.linalg.norm(b - self.A @ x)/norm_b
+        for _ in range(self.max_refine):
+            if res <= self.rtol:
+                break
+            dx = d*self._solve_scaled(d*(b - self.A @ x))
+            res_new = np.linalg.norm(b - self.A @ (x + dx))/norm_b
+            if res_new >= res:
+                break
+            x, res = x + dx, res_new
+        return x
 
     def free(self):
         if self.pardiso is not None:
@@ -207,20 +249,64 @@ class EdgeSpace:
         cs.free()
         return a
 
-    def eigsh(self, KG, KC, k, v0, tol, eigsh):
-        """Buckling multipliers on the null space of C.T, ARPACK in its
-        generalized mode with the inverse of KC on that space
+    def eigsh(self, KG, KC, k, v0, tol, eigsh, mu_est=None, shift=0.9,
+              max_tries=4):
+        """The k eigenvalues theta of ``KG q = theta KC q`` of largest
+        magnitude on the null space of C.T, the smallest buckling multipliers
+        mu = -1/theta, in ascending order of theta, and their eigenvectors
 
-        The inverse of KC restricted to the null space of C.T is the
-        constrained solve, so every Lanczos vector stays in it when the
-        starting vector does; KC is positive definite there, the only place
-        where ARPACK uses it as the inner product. eigsh is the eigen solver,
-        scipy.sparse.linalg.eigsh or one with its signature.
+        With an estimate mu_est of the smallest multiplier, ARPACK in
+        shift-invert mode about theta = -1/sigma, sigma = shift*mu_est, below
+        the critical multiplier: the operator is the inverse of KC + sigma KG
+        on the null space of C.T, which is positive definite when no
+        multiplier lies below sigma. Its factorization proves it, and a
+        failed one lowers sigma by the factor 0.7, up to max_tries times.
+        The shift maps the near critical cluster, whose multipliers are
+        within a few per cent of each other, to eigenvalues 1/(mu - sigma)
+        about ten times better separated than those of the unshifted
+        operator, which is what ARPACK converges on.
+
+        Without mu_est, or when every shift fails, ARPACK in its generalized
+        mode with the inverse of KC on the null space of C.T.
+
+        Either inverse is the constrained solve, so every Lanczos vector
+        stays in the null space of C.T when the starting vector does; KC is
+        positive definite there. The generalized mode uses KC as the inner
+        product. The shift-invert mode does not: KC is singular along the
+        translation, and components the round off leaves outside the null
+        space of C.T, which its inner product does not see, grow until the
+        Ritz vectors are almost parallel to C (residuals of 30 on the Waters
+        shell at ny = 40). Its inner product is ``KC + rho C C.T`` instead,
+        positive definite, and equal to KC on the null space of C.T. eigsh is
+        the eigen solver, scipy.sparse.linalg.eigsh or one with its
+        signature.
         """
+        v0 = self.remove_rigid(v0)
+        if mu_est is not None and mu_est > 0:
+            sigma = shift*mu_est
+            for _ in range(max_tries):
+                try:
+                    cs = self.solver(KC + sigma*KG)
+                except NotPositiveDefinite:
+                    print('# a buckling multiplier below the shift %r, '
+                          'lowering it' % sigma)
+                    sigma *= 0.7
+                    continue
+                #NOTE (KG + KC/sigma)^-1 = sigma (KC + sigma KG)^-1
+                OPinv = LinearOperator(KC.shape, dtype=np.float64,
+                        matvec=lambda b, cs=cs, s=sigma: s*cs.solve(b))
+                C = self.C[:, 0]
+                rho = KC.diagonal().mean()
+                B = LinearOperator(KC.shape, dtype=np.float64,
+                        matvec=lambda v: KC @ v + rho*C*(C @ v))
+                theta, q = eigsh(A=KG, k=k, which='LM', M=B,
+                        sigma=-1/sigma, OPinv=OPinv, tol=tol, v0=v0)
+                cs.free()
+                order = np.argsort(theta)
+                return theta[order], q[:, order]
         cs = self.solver(KC)
         Minv = LinearOperator(KC.shape, matvec=cs.solve, dtype=np.float64)
-        out = eigsh(A=KG, k=k, which='LM', M=KC, Minv=Minv, tol=tol,
-                    v0=self.remove_rigid(v0))
+        out = eigsh(A=KG, k=k, which='LM', M=KC, Minv=Minv, tol=tol, v0=v0)
         cs.free()
         return out
 

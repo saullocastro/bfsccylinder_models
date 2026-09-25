@@ -48,7 +48,7 @@ CASES.append(('Arbocz AW-CYL-1-1 (vK)', f_vk, L2, R2, nx2, ny, prop, 10000.))
 
 for tag, fn, L, R, nx, ny, prop, Nxxunit in CASES:
     for NL in (False, True):
-        out = fn(L, R, nx, ny, prop, cg_x0=None, nint=4, num_eigvals=12,
+        out = fn(L, R, nx, ny, prop, nint=4, num_eigvals=12,
                  koiter_num_modes=0, Nxxunit=Nxxunit, NLprebuck=NL)
         lm = out['load_mult']
         ev = out['eigvecs']
