@@ -335,6 +335,79 @@ Richardson in ny over the last three meshes of each F:
 | 1 | 96-120-160 | p 3.3, 168.04, +23.4 % | not monotone | not monotone |
 | 2 | 96-120-160 | p 2.0, 111.91, +44.4 % | not monotone | p 1.8, -1.684, +40.1 % |
 
+### Extension: SS3-IR at ny = 200 and 240, and F = 3 (2026-09-25)
+
+12 more SS3-IR runs, all finished without error: ny = 200 and 240 at F = 2,
+and F = 3 at ny = 120 and 160. Fine meshes at F >= 2 (time and peak memory
+on one core):
+
+| case | F | ny | nx | dx max (mm) | n_c | ny/n_c | m | Pcr (N) | b_min_t | crit b_t | time (h) | memory (GB) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 2 | 120 | 171 | 7.6 | 30 | 4.0 | 12 | 3915.0 | -0.1462 | -0.2021 | 0.77 | 7.6 |
+| 0 | 2 | 160 | 221 | 5.5 | 30 | 5.3 | 10 | 3875.6 | -0.1572 | -0.2279 | 1.29 | 12.6 |
+| 0 | 2 | 200 | 321 | 5.2 | 31 | 6.5 | 12 | 3862.5 | -0.1732 | -0.2394 | 2.73 | 23.3 |
+| 0 | 2 | 240 | 321 | 5.2 | 31 | 7.7 | 12 | 3857.1 | -0.1762 | -0.2435 | 3.24 | 28.1 |
+| 0 | 3 | 120 | 221 | 5.5 | 30 | 4.0 | 12 | 3913.8 | -0.1465 | -0.2026 | 0.80 | 9.9 |
+| 0 | 3 | 160 | 321 | 5.2 | 30 | 5.3 | 10 | 3875.4 | -0.1576 | -0.2284 | 1.47 | 17.9 |
+| 1 | 2 | 120 | 169 | 7.8 | 24 | 5.0 | 12 | 8991.3 | -0.1676 | -0.2319 | 0.44 | 7.5 |
+| 1 | 2 | 160 | 169 | 7.8 | 24 | 6.7 | 12 | 8953.6 | -0.1855 | -0.2571 | 1.20 | 10.1 |
+| 1 | 2 | 200 | 229 | 5.8 | 24 | 8.3 | 12 | 8914.0 | -0.1903 | -0.2636 | 1.75 | 16.5 |
+| 1 | 2 | 240 | 275 | 4.7 | 24 | 10.0 | 12 | 8902.8 | -0.1920 | -0.2661 | 2.39 | 24.0 |
+| 1 | 3 | 120 | 229 | 5.8 | 24 | 5.0 | 12 | 8966.5 | -0.1653 | -0.2290 | 1.44 | 10.2 |
+| 1 | 3 | 160 | 275 | 4.7 | 24 | 6.7 | 12 | 8920.8 | -0.1827 | -0.2528 | 2.34 | 15.8 |
+| 6 | 2 | 120 | 121 | 10.0 | 29 | 4.1 | 12 | 4556.8 | -0.1929 | -0.2660 | 0.30 | 5.3 |
+| 6 | 2 | 160 | 161 | 7.5 | 30 | 5.3 | 12 | 4517.5 | -0.2182 | -0.3012 | 0.70 | 9.6 |
+| 6 | 2 | 200 | 193 | 6.3 | 30 | 6.7 | 14 | 4505.5 | -0.2002 | -0.3151 | 2.62 | 15.2 |
+| 6 | 2 | 240 | 233 | 5.2 | 30 | 8.0 | 12 | 4500.3 | -0.2326 | -0.3207 | 2.87 | 20.4 |
+| 6 | 3 | 120 | 177 | 6.8 | 29 | 4.1 | 12 | 4552.0 | -0.1942 | -0.2675 | 0.93 | 7.9 |
+| 6 | 3 | 160 | 233 | 5.2 | 30 | 5.3 | 12 | 4516.1 | -0.2185 | -0.3013 | 2.34 | 13.9 |
+
+Error of each mesh at F = 2 against the Richardson estimate from ny = 160, 200 and 240 at F = 2:
+
+| case | quantity | estimate (order) | ny = 120 | ny = 160 | ny = 200 | ny = 240 |
+|---|---|---|---|---|---|---|
+| 0 | Pcr | 3850.8 (p 3.4) | +1.7 % | +0.6 % | +0.3 % | +0.2 % |
+| 0 | b_min_t | -0.17741 (p 7.0) | +17.6 % | +11.4 % | +2.4 % | +0.7 % |
+| 0 | crit b_t | -0.2475 (p 3.9) | +18.3 % | +7.9 % | +3.3 % | +1.6 % |
+| 1 | Pcr | 8895.5 (p 5.1) | +1.1 % | +0.7 % | +0.2 % | +0.1 % |
+| 1 | b_min_t | -0.19349 (p 4.1) | +13.4 % | +4.1 % | +1.7 % | +0.8 % |
+| 1 | crit b_t | -0.26868 (p 3.7) | +13.7 % | +4.3 % | +1.9 % | +1.0 % |
+| 6 | Pcr | 4493.7 (p 3.1) | +1.4 % | +0.5 % | +0.3 % | +0.1 % |
+| 6 | b_min_t | not monotone | -0.19292 | -0.21817 | -0.20016 | -0.23264 |
+| 6 | crit b_t | -0.32711 (p 3.4) | +18.7 % | +7.9 % | +3.7 % | +2.0 % |
+
+A positive error is a b less negative than the estimate: the coarser meshes
+**underestimate** the imperfection sensitivity, the unconservative side.
+
+**Findings**
+
+1. **The axial mesh is converged at F = 2 for cases 0 and 6.** F = 3 against
+   F = 2 at ny = 160 changes Pcr by 0.005 % (case 0) and 0.03 % (case 6), and
+   b_min_t by 0.25 % and 0.1 %. Case 1 is more sensitive: F = 3 moves Pcr by
+   0.4 % and b_min_t by 1.5 % at ny = 160 (nx 169 to 275), and at ny = 240,
+   F = 2 already gives nx = 275.
+2. **Pcr** converges at order 3-5 in ny and is within 0.7 % at ny = 160 and
+   0.2 % at ny = 240 for all three designs.
+3. **b of the critical cluster** converges at order 3.4-3.9 and is the most
+   regular quantity: 7.9 %, 4.3 % and 7.9 % from its estimate at ny = 160,
+   3.3 %, 1.9 % and 3.7 % at ny = 200, and 1.6 %, 1.0 % and 2.0 % at ny = 240
+   (cases 0, 1 and 6).
+4. **b_min_t of the full set** follows it for cases 0 and 1 (0.7 % and 0.8 %
+   at ny = 240) but not for case 6, whose Koiter set changes from 12 to 14
+   modes at ny = 200 (-0.218, -0.200, -0.233 at ny = 160, 200, 240): the set
+   still depends on the mesh where near-equal multipliers of other wave
+   numbers enter or leave it.
+5. **Elements per wave.** ny = 240 is 7.7-10 elements per wave of n_c (30,
+   24 and 30), and gives the critical cluster within 1-2 %; ny = 200 (6.5-8.3)
+   within 2-4 %; ny = 160 (5.3-6.7) within 4-8 %. The rule of about 8
+   elements per wave of n_c, found in the removed studies with the anchored
+   SS3 edges, holds.
+6. The combined fit f = f_inf + a/ny^p + c/nx^q over F >= 2 reproduces the
+   Richardson estimates of Pcr (within 0.1 %), but not those of b: with 6 to
+   8 meshes and five parameters it runs to the ends of its exponent grid
+   (p or q = 0.5) for b_min_t. The Richardson estimates in ny at F = 2 are
+   the reference.
+
 ## Update: element crest and cut degenerate clusters
 
 Two corrections since the first version of this report. Sections 5 and 6
@@ -576,12 +649,28 @@ ny = 200, 57 min.
 
 ## 9. Decision
 
-Open, until the convergence study above is done: the mesh of the DOE (ny
-and the axial factor F, possibly elongated elements), the quantity of the
-DOE (b_min_t of the critical cluster or of a window of wave numbers about
-it), and the edge condition, SS3-IR or free-IR. The options of the previous
-version of this section, which rested on the removed studies, are in git
-history.
+Open. From the restarted convergence study (Sections *Results of the first
+162 runs* and *Extension*):
+
+- **Edge condition: SS3-IR.** free-IR does not converge to a buckling load
+  of the shell (free-edge ovalization at 2.5-6.3 % of the SS3-IR load, still
+  falling with the mesh). SS3-IR gives the SS3 results.
+- **Axial mesh: F = 2**, dx max = dy/2. Elements longer axially than around
+  are worse (case 6 at F = 0.5), and F = 3 changes b by 0.1-1.5 % only.
+- **Quantity:** b of the critical cluster converges regularly; b_min_t of
+  the full set carries, on top of it, the changes of the Koiter set from mesh
+  to mesh (case 6).
+- **ny**, one of, for the error of b of the critical cluster on designs A, B
+  and C and per run on one core:
+  1. ny = 160: 4-8 %, Pcr 0.7 %, 0.7-1.3 h and 10-13 GB;
+  2. ny = 200: 2-4 %, Pcr 0.3 %, 1.8-2.7 h and 15-23 GB;
+  3. ny = 240: 1-2 %, Pcr 0.2 %, 2.4-3.2 h and 20-28 GB, about 8 elements
+     per wave of n_c.
+  The error is on the unconservative side (b less negative) and grows for
+  designs with a larger n_c than 30.
+
+The options of the previous version of this section, which rested on the
+removed studies, are in git history.
 
 ## 10. Issues in the library
 
