@@ -54,7 +54,7 @@ def test_pm45(NLprebuck):
     stack = [45, -45]
     prop = laminated_plate(stack=stack, laminaprop=laminaprop, plyt=plyt,
             offset=plyt, rho=rho)
-    out2 = fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, num_eigvals=5,
+    out2 = fkoiter_cyl_SS3(L, R, nx, ny, prop, num_eigvals=5,
             koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=NLprebuck)
 
     print('fkoiter_cyl_SS3 eigvals', out2['eigvals'])

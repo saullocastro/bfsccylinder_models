@@ -65,19 +65,24 @@ def _run(model, ny, num_eigvals, koiter_num_modes):
     nx = int(ny*L/(2*np.pi*R))
     if nx % 2 == 0:
         nx += 1
-    return model.fkoiter_cyl_SS3(L, R, nx, ny, _prop(), cg_x0=None, nint=4,
+    return model.fkoiter_cyl_SS3(L, R, nx, ny, _prop(), nint=4,
             num_eigvals=num_eigvals, koiter_num_modes=koiter_num_modes,
             Nxxunit=20000., NLprebuck=True)
 
 
 def _unknown_dofs(out):
     """The boundary conditions of fkoiter_cyl_SS3"""
-    x, y = out['x'], out['y']
+    x = out['x']
     bk = np.zeros(DOF*x.shape[0], dtype=bool)
     edges = np.isclose(x, 0) | np.isclose(x, L)
+    #NOTE v and w with their derivatives along the edge, v,y and w,y, as
+    #     the model does, so that v = w = 0 along the whole edge
     bk[3::DOF] = edges
+    bk[5::DOF] = edges
     bk[6::DOF] = edges
-    bk[0::DOF] = np.isclose(x, L/2.) & np.isclose(y, 0)
+    bk[8::DOF] = edges
+    #NOTE no node anchored, the axial translation being removed by the
+    #     inertia relief condition, see bfsccylinder_models/edges.py
     return ~bk
 
 
@@ -198,6 +203,10 @@ def _one_member_per_pair(eigsh):
     """
     def solve(A, k, M, **kwargs):
         eigvals, eigvecs = eigsh(A=A, k=2*k, M=M, **kwargs)
+        #NOTE in ascending order, the critical first, which the shift-invert
+        #     mode of the model does not return them in
+        order = np.argsort(eigvals)
+        eigvals, eigvecs = eigvals[order], eigvecs[:, order]
         mu = -1/eigvals
         keep = []
         for j in range(eigvals.shape[0]):
@@ -241,7 +250,9 @@ def test_conditions_hold_along_every_direction_of_the_null_space(
     T = W @ U
     assert abs(T[0, 1]) > 1e-3*np.sqrt(abs(T[0, 0]*T[1, 1]))
     for A, b in solves[-m*(m + 1)//2:]:
-        assert A.shape[0] == nu + len(koiter['ucond'])
+        #NOTE the unknowns, one row per direction of the null space, and the
+        #     inertia relief condition
+        assert A.shape[0] == nu + len(koiter['ucond']) + 1
         g = b[:nu]
         assert np.abs(U.T @ g).max() <= 1e-9*np.linalg.norm(U, axis=0).max()*np.linalg.norm(g)
     #NOTE more directions than Koiter modes, so that the rows beyond them are

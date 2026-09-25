@@ -1,15 +1,18 @@
 import numpy as np
 from numpy import isclose, pi
 from scipy.sparse import coo_matrix
-from scipy.sparse.linalg import eigsh, spsolve, cg, lobpcg, LinearOperator, spilu
+from scipy.sparse.linalg import eigsh
 from composites import laminated_plate
-from bfsccylinder import (BFSCCylinder, update_KC0, update_KG, DOF, DOUBLE, INT,
-KC0_SPARSE_SIZE, KG_SPARSE_SIZE)
+from bfsccylinder import (BFSCCylinder, update_KC0, update_KG, update_M, DOF,
+        DOUBLE, INT, KC0_SPARSE_SIZE, KG_SPARSE_SIZE, M_SPARSE_SIZE)
 from bfsccylinder.quadrature import get_points_weights
+from bfsccylinder_models.edges import edge_space, mass_matrix
+
+num_nodes = 4
+
 
 def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
-        h_tow, desvars, funcVAT, clamped=True, cg_x0=None, lobpcg_X=None, nint=4,
-        num_eigvals=2, lobpcg_tol=1e-5):
+        h_tow, desvars, funcVAT, nint=4, num_eigvals=2, Nxxunit=1.):
     """
     Linear buckling analysis of a VAT cylinder with properties changing over
     the axial direction (x)
@@ -17,7 +20,11 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     Assumptions:
     - classical shell theory (when BFS element is used)
     - monolithic laminated properties (only one material for the whole laminate)
-    - displacement controlled
+    - SS3 edges with inertia relief, see ``bfsccylinder_models.edges``:
+      v = w = 0 along both edges, the axial load Nxxunit applied on both
+      edges, no node anchored, the axial translation removed by inertia
+      relief
+    - linear pre-buckling state
     - returns the critical buckling load in consistent force units
 
     Parameters
@@ -45,29 +52,22 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
         axial direction, ``xmax`` the maximum value of ``x`` in the domain, and
         ``thetas`` the angle values at the control points, such that the
         ``desvars`` parameter is a sequence of ``thetas``.
-    clamped : bool, optional
-        ``True`` if clamped, ``False`` if simply supported.
-    cg_x0 : array, optional
-        Initial guess for static solver.
-    lobpcg_X : array, optional
-        Initial guess for eigenvectors in the eigenvalue analysis.
     nint : int, optional
         Number of integration points per direction.
     num_eigvals : int, optional
         Number of eigenvalues to extract.
-    lobpcg_tol : float, optional
-        Tolerance passed to ``scipy.sparse.linalg.lobpcg`` in the eigenvalue
-        analysis.
+    Nxxunit : float, optional
+        Axial compressive load per unit circumferential length of the
+        pre-buckling state, the load of load multiplier 1.
 
     Returns
     -------
     out : dict
         out['Pcr'] = critical buckling load
-        out['cg_x0'] = static initial guess
-        out['lobpcg_X'] = eigenvalue initial guess
+        out['load_mult'] = load multipliers of Nxxunit, ascending
         out['mass'] = mass
-        out['eigvals'] = eigenvalues
-        out['eigvecs'] = eigenvectors
+        out['eigvecs'] = buckling modes, as columns
+        out['x'], out['y'] = nodal coordinates
 
     """
     # geometry our FW cylinders
@@ -109,6 +109,7 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     init_k_KG = 0
     laminaprop = (E11, E22, nu12, G12, G12, G12)
     mass = 0
+    havg_elements = []
     print('# starting element assembly')
     for n1, n2, n3, n4 in zip(n1s, n2s, n3s, n4s):
         shell = BFSCCylinder(nint)
@@ -123,6 +124,7 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
         shell.R = R
         shell.lex = L/(nx-1)
         shell.ley = circ/ny
+        havg_elem = 0
         for i in range(nint):
             wi = weights[i]
             x1 = ncoords[nid_pos[n1]][0]
@@ -158,6 +160,7 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
                 wj = weights[j]
                 weight = wi*wj
                 mass += weight*shell.lex*shell.ley/4*prop.intrho
+                havg_elem += weight/4*sum(plyts)
 
                 shell.A11[i, j] = prop.A11
                 shell.A12[i, j] = prop.A12
@@ -177,6 +180,7 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
                 shell.D22[i, j] = prop.D22
                 shell.D26[i, j] = prop.D26
                 shell.D66[i, j] = prop.D66
+        havg_elements.append(havg_elem)
         shell.init_k_KC0 = init_k_KC0
         shell.init_k_KG = init_k_KG
         init_k_KC0 += KC0_SPARSE_SIZE
@@ -188,52 +192,47 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     Kv = np.zeros(KC0_SPARSE_SIZE*num_elements, dtype=DOUBLE)
     for shell in elements:
         update_KC0(shell, points, weights, Kr, Kc, Kv)
-
     KC0 = coo_matrix((Kv, (Kr, Kc)), shape=(N, N)).tocsc()
 
     print('# finished element assembly')
 
-    # applying boundary conditions
-    bk = np.zeros(N, dtype=bool)
-
-    checkSS = isclose(x, 0) | isclose(x, L)
-    bk[0::DOF] = checkSS
-    bk[3::DOF] = checkSS
-    bk[6::DOF] = checkSS
-    if clamped:
-        bk[7::DOF] = checkSS
-    bu = ~bk # same as np.logical_not, defining unknown DOFs
+    #NOTE SS3 edges with inertia relief, no node anchored, see edges.py: the
+    #     axial translation is removed in the metric of the consistent mass
+    #     matrix, at unit density, the density being uniform, which only
+    #     scales it
+    space = edge_space(x, L, DOF)
+    space.set_mass(mass_matrix(elements, update_M, M_SPARSE_SIZE, N,
+            havg_elements, [1.]*num_elements))
 
     print('# starting static analysis')
 
-    # axial compression applied at x=L
-    u = np.zeros(N, dtype=DOUBLE)
+    # axially compressive load applied at x=0 and x=L
+    fext = np.zeros(N)
+    for shell in elements:
+        pos1 = nid_pos[shell.n1]
+        pos3 = nid_pos[shell.n3]
+        if isclose(x[pos3], L):
+            Nxx = -Nxxunit
+            xi = +1
+        elif isclose(x[pos1], 0):
+            Nxx = +Nxxunit
+            xi = -1
+        else:
+            continue
+        indices = []
+        for ci in [shell.c1, shell.c2, shell.c3, shell.c4]:
+            for i in range(DOF):
+                indices.append(ci + i)
+        fe = np.zeros(num_nodes*DOF, dtype=float)
+        for j in range(nint):
+            eta = points[j]
+            shell.update_Su(xi, eta)
+            fe += shell.ley/2.*weights[j]*np.asarray(shell.Su)*Nxx
+        fext[indices] += fe
+    assert isclose(fext.sum(), 0)
 
-    compression = -0.0005
-    checkTopEdge = isclose(x, L)
-    u[0::DOF] += checkTopEdge*compression
-    uk = u[bk]
-
-    # sub-matrices corresponding to unknown DOFs
-    Kuu = KC0[bu, :][:, bu]
-    Kuk = KC0[bu, :][:, bk]
-    Kkk = KC0[bk, :][:, bk]
-
-    fu = -Kuk*uk
-
-    Nu = N - bk.sum()
-
-    # solving
-    PREC = 1/Kuu.diagonal().max()
-
-    uu, info = cg(PREC*Kuu, PREC*fu, x0=cg_x0, atol=0)
-    if info != 0:
-        print('#   failed with cg()')
-        print('#   trying spsolve()')
-        uu = spsolve(Kuu, fu)
-    cg_x0 = uu.copy()
-
-    u[bu] = uu
+    KC0uu = space.matrix(KC0)
+    u = space.expand(space.solve(KC0uu, space.force(fext)))
 
     print('# finished static analysis')
 
@@ -243,54 +242,30 @@ def flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
     for shell in elements:
         update_KG(u, shell, points, weights, KGr, KGc, KGv)
     KG = coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
-    KGuu = KG[bu, :][:, bu]
-
-    # A * x[i] = lambda[i] * M * x[i]
-    #NOTE this works and seems to be the fastest option
-
-    print('# starting spilu')
-    PREC2 = spilu(PREC*Kuu, diag_pivot_thresh=0, drop_tol=1e-8,
-            fill_factor=50)
-    print('# finished spilu')
-    def matvec(x):
-        return PREC2.solve(x)
-    Kuuinv = LinearOperator(matvec=matvec, shape=(Nu, Nu))
+    KGuu = space.matrix(KG)
 
     print('# starting linear buckling analysis')
-
-    maxiter = 1000
-    if lobpcg_X is None:
-        Xu = np.random.rand(Nu, num_eigvals)
-        Xu /= np.linalg.norm(Xu, axis=0)
-    else:
-        Xu = lobpcg_X
-
-    eigvals, eigvecsu, hist = lobpcg(A=PREC*Kuu, B=-PREC*KGuu, X=Xu, M=Kuuinv, largest=False,
-            maxiter=maxiter, retResidualNormsHistory=True, tol=lobpcg_tol)
-    load_mult = eigvals
-    if not len(hist) <= maxiter:
-        print('#   failed with lobpcg()')
-        print('#   trying eigsh()')
-        eigvals, eigvecsu = eigsh(A=Kuu, k=num_eigvals, which='SM', M=KGuu,
-                tol=1e-7, sigma=1., mode='buckling')
-        load_mult = -eigvals
-
+    #NOTE KG q = theta KC0 q on the null space of the inertia relief
+    #     condition, the largest theta in magnitude being the smallest load
+    #     multipliers, -1/theta
+    v0 = np.random.default_rng(0).random(space.size)
+    eigvals, eigvecsu = space.eigsh(KGuu, KC0uu, num_eigvals, v0, 1e-7,
+            eigsh)
+    load_mult = -1/eigvals
+    order = np.argsort(load_mult)
+    load_mult = load_mult[order]
+    eigvecsu = eigvecsu[:, order]
     print('# finished linear buckling analysis')
 
-    force = np.zeros(N)
-    fk = Kuk.T*uu + Kkk*uk
-    force[bk] = fk
-    Pcr = load_mult[0]*(force[0::DOF][checkTopEdge]).sum()
+    Pcr = load_mult[0]*Nxxunit*circ
     print('# critical buckling load', Pcr)
 
     out = {}
     out['Pcr'] = Pcr
-    out['cg_x0'] = cg_x0
-    out['lobpcg_X'] = Xu
+    out['load_mult'] = load_mult
     out['mass'] = mass
-    eigvecs = np.zeros((N, num_eigvals))
-    eigvecs[bu, :] = eigvecsu
-    out['eigvals'] = eigvals
-    out['eigvecs'] = eigvecs
+    out['eigvecs'] = space.expand(eigvecsu)
+    out['x'] = x
+    out['y'] = y
 
     return out

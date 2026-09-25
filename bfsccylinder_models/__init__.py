@@ -7,6 +7,9 @@ Author: Saullo G. P. Castro
 .. automodule:: bfsccylinder_models.cyclic_symmetry
     :members:
 
+.. automodule:: bfsccylinder_models.edges
+    :members:
+
 .. automodule:: bfsccylinder_models.linbuck_VAFW
     :members:
 

@@ -26,10 +26,13 @@ def test():
               [11.5, 38, 18.9],
               [51.4, 5.1, 42.6],
               ]
+    #NOTE the design that made the lobpcg eigen solver of the earlier,
+    #     displacement controlled version of the model fail
     out = flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12,
-            rho, plyt, desvars, func_VAT_P_x, clamped=True, nint=nint,
-            lobpcg_tol=1e-4)
-    print(out)
+            rho, plyt, desvars, func_VAT_P_x, nint=nint)
+    print('Pcr', out['Pcr'])
+    #NOTE regression value of the SS3 edges with inertia relief
+    assert np.isclose(out['Pcr'], 357801.2187399378, rtol=1e-5)
 
 if __name__ == '__main__':
     test()

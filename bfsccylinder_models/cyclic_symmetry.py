@@ -42,8 +42,8 @@ def axisymmetric_basis(axi_order, bu, DOF):
 
     Returns the basis and the boolean mask of its unknown coordinates. A
     reduced coordinate is known as soon as one of the nodes it spans is
-    constrained, the single node constraint then fixing the whole station,
-    which is what an axisymmetric field requires of it anyway.
+    constrained; the edge conditions of the models constrain every node of an
+    edge station alike.
     """
     nx, ny = axi_order.shape
     rows = np.empty((nx, ny, DOF), dtype=np.int64)
@@ -68,19 +68,16 @@ def mesh_order(x, y, nx, ny):
     return np.lexsort((y, x)).reshape(nx, ny)
 
 
-def project_axisymmetric(u, axi_order, imid, DOF):
+def project_axisymmetric(u, axi_order, DOF):
     """Orthogonal projection of u onto the axisymmetric subspace
 
     The average over the orbit of the cyclic shift is the projector onto its
-    invariant subspace. The axial rigid body translation is removed
-    afterwards, by making the axial displacement vanish at the axial station
-    imid, the single node constraint that suppresses it in the models not
-    being axisymmetric itself.
+    invariant subspace. It keeps the inertia relief condition of the models,
+    the mass being uniform around the circumference.
     """
     nx, ny = axi_order.shape
     U = u.reshape(-1, DOF)[axi_order]
     U = np.repeat(U.mean(axis=1, keepdims=True), ny, axis=1)
-    U[:, :, 0] -= U[imid, 0, 0]
     uaxi = np.zeros((nx*ny, DOF), dtype=np.float64)
     uaxi[axi_order] = U
     return uaxi.reshape(-1)
@@ -110,8 +107,8 @@ def degenerate_partner(phi, bu, axi_order, DOF):
     Returns None when there is no partner to build: an axisymmetric mode is
     its own rotation, and so, up to the sign, is the mode with ny/2
     circumferential waves; and a rotation that leaves anything on a
-    constrained degree of freedom other than the axial translation cannot be
-    brought back into the admissible space without leaving the eigenspace.
+    constrained degree of freedom cannot be brought back into the admissible
+    space without leaving the eigenspace.
 
     Parameters
     ----------
@@ -128,21 +125,11 @@ def degenerate_partner(phi, bu, axi_order, DOF):
     phi = np.asarray(phi, dtype=np.float64)
     phi_norm = np.sqrt(phi @ phi)
     psi = rotated(phi, axi_order, DOF)
-    #NOTE the constraint that suppresses the axial translation sits on a
-    #     single node and is not itself symmetric, so the rotated mode does
-    #     not satisfy it. An axial rigid body translation carries no strain
-    #     and is annihilated by both stiffness matrices, so subtracting one
-    #     restores the constraint without taking the mode out of its
-    #     eigenspace. Truncating the offending degree of freedom instead does
-    #     take it out, and since the operator of the second order field is
-    #     singular along the mode, the error is then amplified without bound
-    u_dofs = np.arange(0, bu.shape[0], DOF)
-    pinned = u_dofs[~bu[u_dofs]]
-    if pinned.size:
-        psi[u_dofs] -= psi[pinned].mean()
-    #NOTE anything the rotation still leaves on a constrained degree of
-    #     freedom would have to be truncated, and the result would no longer
-    #     be a mode
+    #NOTE the edge conditions and the inertia relief condition of the models
+    #     are invariant under the rotation, so the rotated mode satisfies
+    #     them; anything it still left on a constrained degree of freedom
+    #     would have to be truncated, and the result would no longer be a
+    #     mode
     if np.abs(psi[~bu]).max(initial=0.) > 1.e-10*np.abs(psi).max():
         return None
     psi -= (psi @ phi)/(phi @ phi)*phi

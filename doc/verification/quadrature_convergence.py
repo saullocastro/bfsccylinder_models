@@ -93,7 +93,7 @@ for tag, model, R, Nxxunit, fx, num_eigvals in (
         t0 = time.time()
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None,
+                out = model.fkoiter_cyl_SS3(L, R, nx, ny, prop,
                         nint=nint, num_eigvals=num_eigvals,
                         koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=True)
         except Exception as e:

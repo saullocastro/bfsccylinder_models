@@ -44,7 +44,7 @@ for cts, nr, name in [(cts_vk, nr_vk, 'von Karman'), (cts_sa, nr_sa, 'Sanders')]
         prop = laminated_plate(stack=[45, -45],
                 laminaprop=(E11, E22, nu12, G12, G12, G12), plyt=tow_thick,
                 offset=tow_thick, rho=rho)
-        out2 = nr.fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None,
+        out2 = nr.fkoiter_cyl_SS3(L, R, nx, ny, prop,
                 num_eigvals=5, koiter_num_modes=1, Nxxunit=Nxxunit,
                 NLprebuck=NLprebuck)
 

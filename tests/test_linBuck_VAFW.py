@@ -7,6 +7,11 @@ import numpy as np
 from bfsccylinder_models.linbuck_VAFW import flinBuck_VAFW
 from bfsccylinder_models.vatfunctions import func_VAT_P_x
 
+#NOTE regression values of the SS3 edges with inertia relief, since the
+#     model was changed from displacement controlled clamped edges; the
+#     constant laminate is checked against koiter_cylinder in test_edges.py
+
+
 def test_2_runs_in_seq():
     L = 0.3 # m
     R = 0.136/2 # m
@@ -22,20 +27,15 @@ def test_2_runs_in_seq():
     G12 = 4.4e9
     tow_thick = 0.4e-3
     rho = 1611 # kg/m3
-    theta_VP_1 = 45.4
-    theta_VP_2 = 86.5
-    theta_VP_3 = 85.8
-    desvars = [[theta_VP_1, theta_VP_2, theta_VP_3]]
-    out = flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick,
-            desvars, func_VAT_P_x, clamped=True)
-    theta_VP_1 = 55.4
-    theta_VP_2 = 76.5
-    theta_VP_3 = 75.8
-    desvars = [[theta_VP_1, theta_VP_2, theta_VP_3]]
-    out = flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, tow_thick,
-            desvars, func_VAT_P_x, clamped=True, cg_x0=out['cg_x0'],
-            lobpcg_X=out['lobpcg_X'])
-    print(out)
+    Pcr = []
+    for thetas in ([45.4, 86.5, 85.8], [55.4, 76.5, 75.8]):
+        out = flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho,
+                tow_thick, [thetas], func_VAT_P_x)
+        Pcr.append(out['Pcr'])
+    print('Pcr', Pcr)
+    assert np.allclose(Pcr, [52827.015618484445, 42176.41489530511],
+                       rtol=1e-5)
+
 
 def test_Z33():
     L = 0.510 # m
@@ -58,9 +58,12 @@ def test_Z33():
                [51, 51, 51],
               ]
     out = flinBuck_VAFW(L, R, nx, ny, E11, E22, nu12, G12, rho, plyt, desvars,
-            func_VAT_P_x, clamped=True)
-    print(out)
+            func_VAT_P_x)
+    print('Pcr', out['Pcr'])
+    assert np.isclose(out['Pcr'], 197096.99124887068, rtol=1e-5)
+    assert np.all(np.diff(out['load_mult']) >= 0)
+
 
 if __name__ == '__main__':
+    test_2_runs_in_seq()
     test_Z33()
-

@@ -17,6 +17,8 @@ from bfsccylinder.quadrature import get_points_weights
 from bfsccylinder_models.cyclic_symmetry import (mesh_order,
         axisymmetric_basis, project_axisymmetric, canonical_modes,
         degenerate_partner)
+from bfsccylinder_models.edges import edge_space, mass_matrix
+from bfsccylinder import update_M, M_SPARSE_SIZE
 from bfsccylinder_models.koiter_tensors import (koiter_element_tensors,
         a_coefficients, b_coefficients)
 
@@ -41,7 +43,7 @@ def nonlinear_rows(elem, xi, eta):
 
 def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         h_tow, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
-        ny_nx_aspect_ratio=1, cg_x0=None,
+        ny_nx_aspect_ratio=1,
         idealistic_CTS=False, mesh_only=False, nint=4, num_eigvals=2,
         koiter_num_modes=1, Nxxunit=1., NLprebuck=False,
         NLprebuck_eps1=0.005, NLprebuck_maxiter=30, NR_maxiter=40,
@@ -325,16 +327,13 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# finished element assembly')
 
     # applying boundary conditions
-    bk = np.zeros(N, dtype=bool)
-
-    checkSS = isclose(x, 0) | isclose(x, L)
-    bk[3::DOF] = checkSS
-    bk[6::DOF] = checkSS
-    check = isclose(x, L/2.) & isclose(y, 0)
-    assert check.sum() == 1
-    bk[0::DOF] = check
-    bu = ~bk # same as np.logical_not, defining unknown DOFs
-    u0 = np.zeros(N, dtype=DOUBLE)
+    #NOTE SS3 edges with inertia relief, no node anchored, see edges.py:
+    #     the axial translation is removed in the metric of the consistent
+    #     mass matrix, at unit density, the density being uniform, which
+    #     only scales it
+    space = edge_space(x, L, DOF)
+    space.set_mass(mass_matrix(elements, update_M, M_SPARSE_SIZE, N,
+            havg_elements, [1.]*num_elements))
 
     print('# starting static analysis')
 
@@ -372,17 +371,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     assert isclose(fext.sum(), 0)
 
     # sub-matrices corresponding to unknown DOFs
-    KC0uu = KC0[bu, :][:, bu]
+    KC0uu = space.matrix(KC0)
 
     KGr = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGc = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=INT)
     KGv = np.zeros(KG_SPARSE_SIZE*num_elements, dtype=DOUBLE)
 
     # solving
-    uu = spsolve(KC0uu, fext[bu])
-    cg_x0 = uu.copy()
+    uu = space.solve(KC0uu, space.force(fext))
 
-    u0[bu] = uu
+    u0 = space.expand(uu)
 
     #NOTE the CTS parameterization of dos Santos and Castro, Materials, 2022,
     #     15(12), 4117, doi:10.3390/ma15124117, steers the tows along x only
@@ -399,12 +397,12 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     #     here, so the axial stations that mesh_order sorts the nodes into are
     #     checked before the axisymmetric basis is built on them
     assert np.all(x[axi_order] == x[axi_order][:, :1])
-    axi_imid = np.argmin(np.abs(xlin - L/2.))
 
-    Baxi, buaxi = axisymmetric_basis(axi_order, bu, DOF)
+    Baxi, buaxi = axisymmetric_basis(axi_order, space.free, DOF)
+    Caxi = space.axisymmetric_condition(Baxi, buaxi)
 
     def project_axi(u):
-        return project_axisymmetric(u, axi_order, axi_imid, DOF)
+        return project_axisymmetric(u, axi_order, DOF)
 
     def solve_axi(KT, rhs):
         """Solve KT du = rhs for the axisymmetric du
@@ -423,7 +421,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         #     equilibrates internally, this dense one does not. Iterates are
         #     unchanged to ten digits on ny=60, so it is a guard, not a fix
         d = 1/np.sqrt(np.abs(Krf.diagonal()))
-        a[buaxi] = d*np.linalg.solve(d[:, None]*Krf*d[None, :], d*rr[buaxi])
+        #NOTE the inertia relief condition as a border, the axial
+        #     translation being a null vector of Krf
+        Cs = np.linalg.qr(d[:, None]*Caxi)[0]
+        n, k = Cs.shape
+        A = np.zeros((n + k, n + k))
+        A[:n, :n] = d[:, None]*Krf*d[None, :]
+        A[:n, n:] = Cs
+        A[n:, :n] = Cs.T
+        a[buaxi] = d*np.linalg.solve(A, np.concatenate((d*rr[buaxi],
+                np.zeros(k))))[:n]
         return Baxi @ a
 
     u0_lin = project_axi(u0)
@@ -435,8 +442,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             update_KG(u, elem, points, weights, KGr, KGc, KGv)
         return coo_matrix((KGv, (KGr, KGc)), shape=(N, N)).tocsc()
 
-    def solve_eig(KCuu, KGuu):
+    def solve_eig(KCuu, KGuu, mu_est=None):
         """Buckling multipliers of the stress state currently stored in KG
+
+        mu_est, an estimate of the smallest multiplier, lets the eigen solver
+        work in shift-invert mode just below it, see EdgeSpace.eigsh
 
         The starting vector is fixed on purpose. ARPACK keeps its random seed
         in a SAVEd variable, so without one the basis it returns for a
@@ -447,10 +457,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         for
         """
         v0 = np.random.default_rng(0).random(KCuu.shape[0])
-        eigvals, eigvecsu = eigsh(A=KGuu, k=num_eigvals, which='LM', M=KCuu,
-                tol=1e-6, v0=v0)
+        eigvals, eigvecsu = space.eigsh(KGuu, KCuu, num_eigvals, v0, 1e-6,
+                eigsh, mu_est=mu_est)
         mu = -1/eigvals
-        return eigvals, canonical_modes(mu, eigvecsu, bu,
+        return eigvals, canonical_modes(mu, eigvecsu, space.free,
                 axi_order, DOF), mu
 
     if NLprebuck:
@@ -525,8 +535,9 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
                 u = ui + solve_axi(KT, -Ri)
                 fint = calc_fint(u, fint)
                 Ri = fint - fext_b
-                crisfield_test = scaling(Ri[bu], D)/max(
-                        scaling(fext_b[bu], D), scaling(fint[bu], D))
+                crisfield_test = scaling(space.force(Ri), D)/max(
+                        scaling(space.force(fext_b), D),
+                        scaling(space.force(fint), D))
                 print('#        iteration', iteration, 'crisfield_test',
                         crisfield_test)
                 if crisfield_test < epsilon:
@@ -584,10 +595,16 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         KG = assemble_KG(u0)
         print('# starting iterative eigenvalue analysis')
         converged = False
+        #NOTE the buckling load of the previous iteration, none before the
+        #     first
+        lambda_c = None
         for iteration in range(1, NLprebuck_maxiter+1):
-            KCuu = KC[bu, :][:, bu]
-            KGuu = KG[bu, :][:, bu]
-            eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
+            KCuu = space.matrix(KC)
+            KGuu = space.matrix(KG)
+            #NOTE the buckling load of the previous iteration, as a multiplier
+            #     of the present load level, for the shift of the eigen solver
+            mu_est = None if lambda_c is None else lambda_c/lambda_b
+            eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu, mu_est)
             lambda_c = lambda_b*mu[0] # Eq. (46)
             print('#    iteration', iteration, 'lambda_b', lambda_b,
                     'lambda_c', lambda_c, 'lambda_b/lambda_c',
@@ -700,7 +717,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         KC = KC0
         KCuu = KC0uu
         KG = assemble_KG(u0)
-        KGuu = KG[bu, :][:, bu]
+        KGuu = space.matrix(KG)
         print('# starting eigenvalue analysis')
         eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu)
         lambda_c = lambda_b*mu[0]
@@ -722,13 +739,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     print('# critical buckling load', Pcr)
 
     out['Pcr'] = Pcr
-    out['cg_x0'] = cg_x0
     out['eigvals'] = eigvals
     out['load_mult'] = load_mult
     out['lambda_b'] = lambda_b
     out['mu'] = mu
-    eigvecs = np.zeros((N, num_eigvals))
-    eigvecs[bu, :] = eigvecsu
+    eigvecs = space.expand(eigvecsu)
     out['eigvecs'] = eigvecs
     out['rCTS'] = rCTS
     out['param_n'] = param_n
@@ -739,6 +754,19 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     out['c1'] = c1
     out['c2'] = c2
     out['koiter'] = None
+
+    #NOTE koiter_num_modes may be a callable of the multipliers and of the
+    #     eigenvectors over every degree of freedom, returning the number of
+    #     Koiter modes, so that the expansion can be made on a set chosen
+    #     from the computed modes, e.g. one that does not cut a group of
+    #     modes of equal multiplier. It is called once, after the last
+    #     eigenvalue analysis
+    if callable(koiter_num_modes):
+        koiter_num_modes = int(koiter_num_modes(mu, eigvecs))
+        if not 0 <= koiter_num_modes <= num_eigvals:
+            raise ValueError('koiter_num_modes returned %d, outside 0 to '
+                    'num_eigvals=%d' % (koiter_num_modes, num_eigvals))
+    out['koiter_num_modes'] = koiter_num_modes
 
     if koiter_num_modes == 0:
         return out
@@ -765,7 +793,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     #     eigen solver returns a partner is decided by round off, and one left
     #     out of the column border is a null vector of the whole bordered
     #     matrix, so it is rebuilt from the cyclic symmetry when missing
-    cols = [ua[modek][bu] for modek in range(koiter_num_modes)]
+    cols = [space.restrict(ua[modek]) for modek in range(koiter_num_modes)]
     for j in range(num_eigvals):
         if abs(mu[j] - mu[0]) > 1.e-3*abs(mu[0]):
             continue
@@ -773,9 +801,10 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
         group = [k for k in range(num_eigvals)
                  if abs(mu[k] - mu[j]) <= 1.e-5*abs(mu[j])]
         if len(group) == 1:
-            partner = degenerate_partner(eigvecs[:, j], bu, axi_order, DOF)
+            partner = degenerate_partner(eigvecs[:, j], space.free, axi_order,
+                    DOF)
             if partner is not None:
-                cols.append(partner[bu])
+                cols.append(space.restrict(partner))
     #NOTE the Koiter modes first, then what the other vectors add to them.
     #     Every eigenvector that is also a Koiter mode is in cols twice, and a
     #     QR factorization without pivoting would give the round off left of
@@ -798,8 +827,7 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     for modek in range(koiter_num_modes):
         ucond[modek] = ua[modek]
     for col in range(koiter_num_modes, Nsp.shape[1]):
-        v = np.zeros(N)
-        v[bu] = Nsp[:, col]
+        v = space.expand(Nsp[:, col])
         ucond[col] = v
     num_cond = len(ucond)
 
@@ -894,11 +922,24 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
     #     keeps the second order field from bringing back amplitude the
     #     expansion gave zero. See "Second-order fields and the orthogonality
     #     condition" in doc/nlprebuck_implementation.tex
-    nu = int(bu.sum())
-    W = phi20[bu]
+    nu = space.size
+    W = space.force(phi20)
 
-    bordered = bmat([[phi2uu, csc_matrix(Nsp)],
-                     [csc_matrix(W).T, None]], format='csc')
+    #NOTE and the inertia relief condition, C.T uab = 0, as a last border.
+    #     Every row and column of the border is scaled to the largest entry
+    #     of a typical row of phi2: unscaled, the border rows are orders of
+    #     magnitude smaller than the stiffness rows, and SuperLU, the solver
+    #     without pypardiso, left the orthogonality conditions they impose
+    #     satisfied to 5e-6 only, against 5e-8 with PARDISO. The scaling
+    #     changes nothing else, the multipliers of the border being unused
+    kscale = np.median(abs(phi2uu).max(axis=1).toarray())
+    sW = kscale/np.abs(W).max(axis=0)
+    sN = kscale/np.abs(Nsp).max(axis=0)
+    sC = kscale/np.abs(space.C).max(axis=0)
+    bordered = bmat([[phi2uu, csc_matrix(Nsp*sN), csc_matrix(space.C*sC)],
+                     [csc_matrix(W*sW).T, None, None],
+                     [csc_matrix(space.C*sC).T, None, None]], format='csc')
+    num_border = num_cond + space.C.shape[1]
 
     #NOTE cstq[i, j, k] = cst_ab[(i, j)] @ ucond[k]
     cstq = np.tensordot(cst, Ucond, axes=(0, 0))
@@ -913,12 +954,11 @@ def fkoiter_cylinder_CTS_circum(L, R, rCTS, nxt, ny, E11, E22, nu12, G12, rho,
             if modej < modei:
                 uab[(modei, modej)] = uab[(modej, modei)]
                 continue
-            rhs = np.zeros(nu + num_cond)
-            rhs[:nu] = force2ndorder_ij(modei, modej)[bu]
-            rhs[nu:] = -cstq[modei, modej]
+            rhs = np.zeros(nu + num_border)
+            rhs[:nu] = space.force(force2ndorder_ij(modei, modej))
+            rhs[nu:nu + num_cond] = -cstq[modei, modej]*sW
             sol = spsolve(bordered, rhs)
-            uijbar = np.zeros(N)
-            uijbar[bu] = sol[:nu]
+            uijbar = space.expand(sol[:nu])
             uab[(modei, modej)] = uijbar
 
     print('# b_ijkl factors')

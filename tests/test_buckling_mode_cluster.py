@@ -51,7 +51,7 @@ def _run(ny, num_eigvals, NLprebuck):
     prop = laminated_plate(stack=STACK,
                            laminaprop=(E11, E22, nu12, G12, G12, G12),
                            plyt=H/len(STACK))
-    return fkoiter_cyl_SS3(L, R, nx, ny, prop, cg_x0=None, nint=4,
+    return fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
                            num_eigvals=num_eigvals, koiter_num_modes=0,
                            Nxxunit=20000., NLprebuck=NLprebuck)
 
@@ -81,12 +81,17 @@ def test_nonlinear_prebuckling_opens_a_spectral_gap():
     a well-defined set.
 
     Measured on the Sun et al. shell, ny=40: four degenerate pairs lie within
-    one per cent of the critical multiplier and the fifth sits 2.3 per cent
-    above the fourth. That gap is an order of magnitude wider than the
-    spacing inside the cluster, which is what makes a multi-mode truncation
-    of it well posed. With a LINEAR pre-buckling state the corresponding gap
-    is 0.28 per cent, comparable to the internal spacing, and no truncation
-    is defensible.
+    1.4 per cent of the critical multiplier (1, 1.0044, 1.0052, 1.0136) and
+    the fifth sits 2.2 per cent above the fourth. That gap is 2.7 times the
+    widest spacing inside the cluster, which is what makes a multi-mode
+    truncation of it well posed. With a LINEAR pre-buckling state the
+    critical pair is alone, 3.5 per cent below the next.
+
+    With v and w fixed at the edge nodes only, before the edges were fixed
+    along their whole length, the same mesh had four pairs within one per
+    cent, a 2.3 per cent gap, and 0.28 per cent with a linear pre-buckling
+    state: the edges free to deflect between the nodes added near-critical
+    modes.
 
     Regression values for this mesh; the qualitative statement, gap >> internal
     spacing, is the part that carries meaning.
@@ -94,17 +99,17 @@ def test_nonlinear_prebuckling_opens_a_spectral_gap():
     mu = _run(ny=40, num_eigvals=10, NLprebuck=True)['mu']
     ratio = mu/mu[0]
 
-    n_within_1pct = int((ratio - 1 <= 0.01).sum())
-    assert n_within_1pct == 8, (
-            'expected 4 degenerate pairs within 1%% of critical, got %d modes'
-            % n_within_1pct)
+    n_within = int((ratio - 1 <= 0.015).sum())
+    assert n_within == 8, (
+            'expected 4 degenerate pairs within 1.5%% of critical, got %d '
+            'modes' % n_within)
 
     gap = ratio[8]/ratio[7] - 1
     assert gap > 0.02, 'expected a spectral gap above 2%%, got %.4f' % gap
 
     #NOTE the spacing INSIDE the cluster, which the gap must dominate
     internal = max(ratio[k + 2]/ratio[k] - 1 for k in (0, 2, 4))
-    assert gap > 5*internal, (
+    assert gap > 2*internal, (
             'gap %.4f does not dominate the internal spacing %.4f'
             % (gap, internal))
 
@@ -113,13 +118,14 @@ def test_single_mode_expansion_is_a_truncation_of_that_cluster():
     """The count that a multi-mode expansion would have to reach.
 
     koiter_num_modes=1 retains one eigenvector; closing the one per cent
-    cluster of the Sun et al. shell needs eight, and its first omission is
-    the degenerate partner of the critical mode itself. Recorded here so the
+    cluster of the Sun et al. shell needs six, eight with v and w fixed at
+    the edge nodes only, and its first omission is the degenerate partner of
+    the critical mode itself. Recorded here so the
     number is checked rather than remembered.
     """
     mu = _run(ny=40, num_eigvals=10, NLprebuck=True)['mu']
     needed = int(((mu/mu[0] - 1) <= 0.01).sum())
-    assert needed == 8
+    assert needed == 6
     #NOTE the partner of the critical mode is degenerate with it, so even
     #     koiter_num_modes=2 is the minimum for a complete critical eigenspace
     assert np.isclose(mu[0], mu[1], rtol=1e-6)
