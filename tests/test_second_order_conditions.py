@@ -203,6 +203,10 @@ def _one_member_per_pair(eigsh):
     """
     def solve(A, k, M, **kwargs):
         eigvals, eigvecs = eigsh(A=A, k=2*k, M=M, **kwargs)
+        #NOTE in ascending order, the critical first, which the shift-invert
+        #     mode of the model does not return them in
+        order = np.argsort(eigvals)
+        eigvals, eigvecs = eigvals[order], eigvecs[:, order]
         mu = -1/eigvals
         keep = []
         for j in range(eigvals.shape[0]):

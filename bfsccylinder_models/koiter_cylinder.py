@@ -404,12 +404,15 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
         KG = assemble_KG(u0)
         print('# starting iterative eigenvalue analysis')
         converged = False
+        #NOTE the buckling load of the previous iteration, none before the
+        #     first
+        lambda_c = None
         for iteration in range(1, NLprebuck_maxiter+1):
             KCuu = space.matrix(KC)
             KGuu = space.matrix(KG)
             #NOTE the buckling load of the previous iteration, as a multiplier
             #     of the present load level, for the shift of the eigen solver
-            mu_est = None if iteration == 1 else lambda_c/lambda_b
+            mu_est = None if lambda_c is None else lambda_c/lambda_b
             eigvals, eigvecsu, mu = solve_eig(KCuu, KGuu, mu_est)
             lambda_c = lambda_b*mu[0] # Eq. (46)
             print('#    iteration', iteration, 'lambda_b', lambda_b,
@@ -723,10 +726,20 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
     nu = space.size
     W = space.force(phi20)
 
-    #NOTE and the inertia relief condition, C.T uab = 0, as a last border
-    bordered = bmat([[phi2uu, csc_matrix(Nsp), csc_matrix(space.C)],
-                     [csc_matrix(W).T, None, None],
-                     [csc_matrix(space.C).T, None, None]], format='csc')
+    #NOTE and the inertia relief condition, C.T uab = 0, as a last border.
+    #     Every row and column of the border is scaled to the largest entry
+    #     of a typical row of phi2: unscaled, the border rows are orders of
+    #     magnitude smaller than the stiffness rows, and SuperLU, the solver
+    #     without pypardiso, left the orthogonality conditions they impose
+    #     satisfied to 5e-6 only, against 5e-8 with PARDISO. The scaling
+    #     changes nothing else, the multipliers of the border being unused
+    kscale = np.median(abs(phi2uu).max(axis=1).toarray())
+    sW = kscale/np.abs(W).max(axis=0)
+    sN = kscale/np.abs(Nsp).max(axis=0)
+    sC = kscale/np.abs(space.C).max(axis=0)
+    bordered = bmat([[phi2uu, csc_matrix(Nsp*sN), csc_matrix(space.C*sC)],
+                     [csc_matrix(W*sW).T, None, None],
+                     [csc_matrix(space.C*sC).T, None, None]], format='csc')
     num_border = num_cond + space.C.shape[1]
 
     #NOTE cstq[i, j, k] = cst_ab[(i, j)] @ ucond[k]
@@ -744,7 +757,7 @@ def fkoiter_cyl_SS3(L, R, nx, ny, prop, nint=4,
                 continue
             rhs = np.zeros(nu + num_border)
             rhs[:nu] = space.force(force2ndorder_ij(modei, modej))
-            rhs[nu:nu + num_cond] = -cstq[modei, modej]
+            rhs[nu:nu + num_cond] = -cstq[modei, modej]*sW
             sol = spsolve(bordered, rhs)
             uijbar = space.expand(sol[:nu])
             uab[(modei, modej)] = uijbar
