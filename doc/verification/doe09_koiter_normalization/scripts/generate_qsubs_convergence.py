@@ -12,7 +12,8 @@ the axial load on both edges and no node anchored:
 Every edge condition and case at ny = 24, 32, 40, 48, 64, 80, 96, 120 and
 160 and at the axial factors F = 0.5, 1 and 2, the largest axial element
 length being dy/F: elements twice as long axially as around, square, and
-half as long; 162 runs. The previous convergence studies, all with the SS3
+half as long; 162 runs. Then SS3-IR at ny = 200 and 240 with F = 2, and at
+F = 3 with ny = 120 and 160, 12 runs. The previous convergence studies, all with the SS3
 edges anchored at one node, were removed from the branch; git history has
 them.
 
@@ -75,6 +76,15 @@ for edges in edges_list:
             for ny in nys:
                 runs.append(dict(edges=edges, icase=icase, ny=ny,
                                  axial_factor=F))
+#NOTE extension of SS3-IR after the first 162 runs, whose b at ny = 160
+#     (5.3 elements per wave of n_c = 30) was still 2 to 12 % from its
+#     Richardson estimate: ny = 200 and 240 at F = 2, and F = 3 at ny = 120
+#     and 160 for the axial mesh
+for icase in cases:
+    for ny in [200, 240]:
+        runs.append(dict(edges='SS3-IR', icase=icase, ny=ny, axial_factor=2.))
+    for ny in [120, 160]:
+        runs.append(dict(edges='SS3-IR', icase=icase, ny=ny, axial_factor=3.))
 for r in runs:
     r['outname'] = DOE_name + ('_conv_%05d_ny%03d_NL_%s.out'
                                % (r['icase'], r['ny'], tag(r)))
