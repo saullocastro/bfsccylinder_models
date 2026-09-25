@@ -290,6 +290,43 @@ A positive error is a b less negative than the estimate: the coarser meshes
    (p or q = 0.5) for b_min_t. The Richardson estimates in ny at F = 2 are
    the reference.
 
+### Verification of the cleanup and of the new solvers (2026-09-25)
+
+The F = 2 sequences at ny = 120 to 240 were run again twice: with the
+cleanup of commit `6d7d26d` (SS3-IR the only support of the models, all 12
+runs) and with the scaled Cholesky and shift-invert solvers of `e0a16a7` (8
+of 12 runs finished when this was written, the others still running in
+`~/DOE09/verify_solver`). Pcr as the relative difference from the archived
+runs of this study; b of the critical cluster (crit b_t) and b_min_t of the
+full set as archive / cleanup / new solvers; m the number of Koiter modes.
+
+| case | ny | Pcr, cleanup / solvers | crit b_t | b_min_t | m |
+|---|---|---|---|---|---|
+| 0 | 120 | 1e-15 / 1e-13 | -0.20209 / -0.20209 / -0.20209 | -0.14622 / -0.14624 / -0.14615 | 12 / 12 / 12 |
+| 0 | 160 | 2e-13 / 2e-13 | -0.22795 / -0.22795 / -0.22796 | -0.15718 / -0.15712 / -0.15721 | 10 / 10 / 10 |
+| 0 | 200 | 8e-13 / - | -0.23937 / -0.23937 / - | -0.17316 / -0.17314 / - | 12 / 12 / - |
+| 0 | 240 | 2e-13 / - | -0.24353 / -0.24353 / - | -0.17622 / -0.17623 / - | 12 / 12 / - |
+| 1 | 120 | 4e-15 / 6e-15 | -0.23193 / -0.23204 / -0.23192 | -0.16755 / -0.16739 / -0.16743 | 12 / 12 / 12 |
+| 1 | 160 | 2e-16 / 2e-16 | -0.25705 / -0.25705 / -0.25705 | -0.18547 / -0.18550 / -0.18587 | 12 / 12 / 12 |
+| 1 | 200 | 2e-14 / 2e-13 | -0.26356 / -0.26356 / -0.26356 | -0.19028 / -0.19022 / -0.19042 | 12 / 12 / 12 |
+| 1 | 240 | 5e-14 / - | -0.26606 / -0.26607 / - | -0.19197 / -0.19219 / - | 12 / 12 / - |
+| 6 | 120 | 2e-14 / 2e-14 | -0.26601 / -0.26601 / -0.26599 | -0.19292 / -0.19303 / -0.16712 | 12 / 12 / 10 |
+| 6 | 160 | 4e-15 / 3e-14 | -0.30124 / -0.30123 / -0.30125 | -0.21817 / -0.21829 / -0.21822 | 12 / 12 / 12 |
+| 6 | 200 | 1e-14 / 3e-14 | -0.31507 / -0.31511 / -0.31510 | -0.20016 / -0.22821 / -0.22826 | 14 / 12 / 12 |
+| 6 | 240 | 2e-13 / - | -0.32067 / -0.32068 / - | -0.23264 / -0.23257 / - | 12 / 12 / - |
+
+- Pcr is unchanged by either change, to 1e-12 at most.
+- b of the critical cluster is unchanged to about 5e-4: the convergence of b
+  and the options of the Decision are not affected.
+- b_min_t of the full set changes whenever the Koiter set does, where
+  multipliers of other wave numbers are nearly equal and round off decides
+  which modes enter it: case 6 at ny = 200 in the archive (14 modes), and
+  at ny = 120 with the new solvers (10 modes, -0.167 against -0.193). One
+  more reason to take b of the critical cluster as the quantity of the DOE.
+- The run times on the cluster, one core on shared nodes, vary by up to a
+  factor of 2 from run to run and do not measure the solvers; see the
+  benchmark in `doc/nlprebuck_implementation.tex`, Section Edge conditions.
+
 ## Update: element crest and cut degenerate clusters
 
 Two corrections since the first version of this report. Sections 5 and 6
