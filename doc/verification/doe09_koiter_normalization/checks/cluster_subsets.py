@@ -17,8 +17,7 @@ Unlike the b_iiii of a single mode, the b_min of a whole cluster does not
 depend on the slice of a degenerate eigenspace returned by the eigen solver,
 and is followed across meshes as a measure of the discretization error;
 see the Richardson estimate at the end, from the three meshes NYS, default
-120, 160 and 200. clusters, complete, energy_b, cluster_b and richardson are
-used by reassessment_post.py as well.
+120, 160 and 200. richardson is used by convergence_post.py as well.
 
 usage, from doc/verification/doe09_koiter_normalization:
 
@@ -102,8 +101,7 @@ def richardson(nys, f):
 
 
 def main(paths, nys=(120, 160, 200)):
-    #NOTE the runs of the present setup only, those of the reassessment
-    #     studies with other options being in reassessment_post.py
+    #NOTE the runs of the present setup only
     runs = [json.loads(l)['result'] for path in paths
             for l in gzip.open(path, 'rt')]
     runs = [r for r in runs if r and 'error' not in r

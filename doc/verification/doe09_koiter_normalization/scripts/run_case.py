@@ -6,14 +6,13 @@ usage: python run_case.py ICASE LIN|NL [NY] [--distinct K] [--num-eigvals N]
                          [--kinematics sanders|donnell] [--thickness-factor T]
                          [--nxxunit N]
 
-NY overrides ny below, for the convergence study. The options, for the
-reassessment studies (generate_qsubs_reassess.py), override
-koiter_num_distinct, num_eigvals, axial_factor, NLprebuck_eps1, nint,
-kinematics, thickness_factor and Nxxunit below, and
-only when this file runs as a script, so that the globals seen by
-generate_qsubs.py are those of the DOE. The last line printed is
-"RESULT {json}", read by post.py, post_convergence.py and
-checks/reassessment_post.py
+NY overrides ny below, for the convergence study
+(generate_qsubs_convergence.py). The options override koiter_num_distinct,
+num_eigvals, axial_factor, NLprebuck_eps1, nint, kinematics,
+thickness_factor and Nxxunit below, and only when this file runs as a
+script, so that the globals seen by an importing script are those of the
+DOE. The last line printed is "RESULT {json}", read by
+checks/convergence_post.py and checks/cluster_subsets.py
 """
 import os
 import sys
@@ -41,27 +40,26 @@ from scipy.optimize import minimize
 
 import koiter_post
 
-#NOTE koiter_num_modes given as a callable needs bfsccylinder_models of the
-#     branch doe09-koiter-normalization, which the job scripts put first on
-#     PYTHONPATH
+#NOTE koiter_num_modes given as a callable and the SS3-IR edges need
+#     bfsccylinder_models after 0.4.0 (commit 74b6ab7), which the job scripts
+#     put first on PYTHONPATH
 import inspect
 if 'callable(koiter_num_modes)' not in inspect.getsource(
         model.fkoiter_cylinder_CTS_circum):
     raise ImportError('bfsccylinder_models at %s does not take koiter_num_modes '
-            'as a callable, use the branch doe09-koiter-normalization'
+            'as a callable, use a version after 0.4.0'
             % bfsccylinder_models.__file__)
 if 'mass_matrix' not in inspect.getsource(model.fkoiter_cylinder_CTS_circum):
     raise ImportError('bfsccylinder_models at %s has no inertia relief '
-            'edges, use the branch doe09-koiter-normalization'
+            'edges, use a version after 0.4.0'
             % bfsccylinder_models.__file__)
 
 DOE_name = 'DOE09'
 DOF = 10
 
-#NOTE mesh, see the convergence study (DOE09_convergence.txt): with
-#     NLprebuck=True, Pcr at ny=160 is within 0.2, 0.1 and 0.5 per cent of
-#     ny=200 for cases 0, 1 and 6, while b_factor still changes by 6, 7 and
-#     20 per cent
+#NOTE mesh, see the convergence study in REPORT.md, Decision: at ny=160,
+#     NLprebuck=True, Pcr of cases 0, 1 and 6 is within 0.7 per cent of its
+#     Richardson estimate, b of the critical cluster within 4 to 8 per cent
 ny = 160 #NOTE number of elements around circumference, nxt from choose_nxt
 
 #NOTE relative residual above which a PARDISO solution is rejected
@@ -72,8 +70,8 @@ max_residual = 1.e-8
 #     group of equal multipliers, to koiter_cluster_rtol, of the last one, and
 #     on the rotated partner of each, see use_distinct_modes, which sets
 #     koiter_num_modes to the callable that returns their number to the model
-#     after its last eigenvalue analysis (bfsccylinder_models, branch
-#     doe09-koiter-normalization). num_eigvals must leave room for the
+#     after its last eigenvalue analysis (bfsccylinder_models after
+#     0.4.0). num_eigvals must leave room for the
 #     partners and for the mode that ends the last group
 koiter_num_distinct = 5
 koiter_cluster_rtol = 1.e-5
@@ -442,7 +440,7 @@ def estimate_nx(L, R, ny, rCTS, param_n, c2_ratio, thetadeg_c1, thetadeg_c2,
         c1_threshold_factor=0.01, c2_threshold_factor=0.01, axial_factor=1.):
     """Axial stations of the mesh of design_function, to within a few
 
-    Used by generate_qsubs.py to estimate the time and memory of each run
+    Used by generate_qsubs_convergence.py to estimate the time and memory of each run
     without assembling the model. t, c1, c2 and the plateau nodes as in
     choose_nxt
     """
@@ -810,7 +808,7 @@ if __name__ == '__main__':
                   v5=v5, library=bfsccylinder_models.__file__,
                   solvers=solvers, koiter_num_distinct=koiter_num_distinct,
                   koiter_cluster_rtol=koiter_cluster_rtol,
-                  #NOTE see generate_qsubs.py
+                  #NOTE complete clusters, see use_distinct_modes
                   koiter_set='complete_clusters',
                   num_eigvals=num_eigvals, axial_factor=axial_factor,
                   NLprebuck_eps1=NLprebuck_eps1, nint=nint,
@@ -841,7 +839,8 @@ if __name__ == '__main__':
             b_iiii=[b_ijkl[i][i][i][i] for i in range(m)],
             )
         #NOTE b_ijkl and a_ijk above are for the nodal normalization of the
-        #     models; post.py rescales them with these, see ElementField
+        #     models; koiter_post.rescaled rescales them with these, see
+        #     ElementField
         #NOTE crest and RMS of w of every Koiter mode from the kinematics of
         #     the element, see ElementField and koiter_post.py
         field = ElementField(out)
@@ -870,7 +869,7 @@ if __name__ == '__main__':
         result.update(
             b_min_energy=b_min, e_min=[float(v) for v in e_min],
             crest_e=crest_e, b_min_t=b_min/crest_e**2,
-            #NOTE crest and RMS from ElementField, see generate_qsubs.py
+            #NOTE crest and RMS from ElementField, see REPORT.md, Update
             crest_method='element_orbit',
             )
         #NOTE b_min_energy, crest_e and b_min_t of subsets of whole
@@ -917,7 +916,8 @@ if __name__ == '__main__':
         traceback.print_exc()
         result['error'] = traceback.format_exc().splitlines()[-1]
     result['time_s'] = time.time() - t0
-    #NOTE peak resident memory, which sets num_parallel in generate_qsubs.py
+    #NOTE peak resident memory, against which mem_per_dof of
+    #     generate_qsubs_convergence.py was set
     try:
         import resource
         result['peak_mem_gb'] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6

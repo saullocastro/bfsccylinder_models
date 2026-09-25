@@ -124,8 +124,7 @@ cd $PBS_O_WORKDIR
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-#NOTE bfsccylinder_models of the branch doe09-koiter-normalization, see
-#     run_case.py
+#NOTE bfsccylinder_models after 0.4.0, see run_case.py
 export PYTHONPATH=/home/saullogiovanip/bfsccylinder_models
 {python} -u run_case.py {icase} NL {ny} {options} > {outname} 2>&1
 """.format(mem=mem_gb, walltime=walltime, python=python, icase=r['icase'],

@@ -506,19 +506,13 @@ eigen solver returns an arbitrary two-dimensional slice of it.
 
 ### Consequences, 5-mode expansion
 
-Case 1, NL, ny = 80, with the 5-mode `run_case.py` of that stage:
-
-- [`checks/pair_mixing.py`](checks/pair_mixing.py), modes 0 and 1 rotated by
-  30 degrees in their plane after the ordering of `use_distinct_modes`: the
-  5-mode b_min (energy normalization, computed afterwards from the stored
-  b_ijkl) went from -0.475 to -0.449, and b_2222 from -0.295 to -0.255,
-  although modes 2 and 3 were not touched;
-- [`checks/same_process_resolve.py`](checks/same_process_resolve.py), the
-  same model solved twice in one process, the second time with the same
-  mixing of modes 0 and 1: the pre-buckling state agreed to 3e-14, but mode 2
-  differed (relative difference 1.27), b_2222 = -0.286 against -0.255. The
-  mixing of modes 0 and 1 cannot change mode 2, so the slice of the n = 23
-  eigenspace returned by the eigen solver changed between the two solves.
+With the 5-mode setup of that stage (case 1, NL, ny = 80), rotating modes 0
+and 1 by 30 degrees in their plane moved b_2222 from -0.295 to -0.255
+although mode 2 was not touched, and solving the same model twice in one
+process returned a different mode 2 (relative difference 1.27): the slice of
+the n = 23 eigenspace returned by the eigen solver depends on round off. The
+scripts of these two checks ran on a `run_case.py` that no longer exists and
+were removed; they are in git history (commit `74b6ab7`).
 
 ### Fix
 
@@ -555,16 +549,9 @@ check gave -0.4678 against -0.5975.
 
 The 10-mode Koiter section takes 30 ms per element more than the 5-mode one,
 the median of the 24 pairs of runs (23 to 38 ms, one-core runs on shared
-nodes), 47 ms per element in all, now in `koiter_time_per_element` of
-`generate_qsubs.py`. Peak memory 13.5 GB for the largest run, case 0, NL,
-ny = 200, 57 min.
-
-| ny | core-hours | jobs |
-|---|---|---|
-| 160 | 19,100 | 402 |
-| 200 | 28,900 | 1,058 |
-
-(15,800 core-hours at ny = 160 with the 5-mode setup.)
+nodes), 47 ms per element in all. Peak memory 13.5 GB for the largest run,
+case 0, NL, ny = 200, 57 min. The time and memory per run of the options of
+the [Decision](#9-decision) are those of the convergence study.
 
 ## 9. Decision
 
@@ -612,6 +599,10 @@ Reported, not changed; both are worked around in `run_case.py`:
 
 ## 11. Changes to the DOE09 driver
 
+The production drivers of the DOE, `generate_qsubs.py` and `post.py`, stay
+in the DOE09 working directory; only what the checks and the convergence
+study need is kept here.
+
 - `run_case.py`
   - `koiter_num_distinct = 5`, `koiter_rotation_closed = True`,
     `koiter_num_modes = 10`, `use_distinct_modes` as in Section 6;
@@ -621,25 +612,18 @@ Reported, not changed; both are worked around in `run_case.py`:
     kinematics, replacing `mode_amplitudes` and `field_crest`),
     `pair_rotation` and `orbit_crest` (largest crest over the rotations within
     one element), crest_e_min, rotation_error, and crest_method =
-    'element_orbit', which `generate_qsubs.py` and `post.py` require of an
-    output; the edge condition of the models, SS3-IR, as `edges` in the
-    RESULT line.
+    'element_orbit'; the edge condition of the models, SS3-IR, as `edges`
+    in the RESULT line.
 - `koiter_post.py`: `rescaled`, `energy_scales`, `symmetrized`,
   `min_direction`.
-- `post.py`: `DOE09_koiter.npz` with the nodal b_ijkl and a_ijk of the 10
-  modes, the scales of the other normalizations, b_min_energy, b_min_t,
-  crest_e and e_min; b_min_t and b_min_energy in `DOE09_output.txt`.
-- `generate_qsubs.py`: requires the closed 10-mode setup, reruns outputs of
-  earlier setups, `koiter_time_per_element = 0.047`, `python -u` so that a
-  crashed run keeps its log.
 - `generate_qsubs_convergence.py`: the restarted convergence study, see
   the top of this report.
 
 The scripts in [`checks/`](checks) were run from the DOE09 directory, next to
 `DOE09.txt`, with the `run_case.py` of their stage: `crest_methods.py` and
-`element_crest_reference.py` with the one of the Update, `mode_pairs.py`,
-`pair_mixing.py` and `same_process_resolve.py` with the 5-mode one, `fourfold_degeneracy.py` and
-`eigenspace_slice.py` with the 10-mode one of [`scripts/`](scripts).
+`element_crest_reference.py` with the one of the Update, `mode_pairs.py`
+with the 5-mode one, `fourfold_degeneracy.py` and `eigenspace_slice.py`
+with the 10-mode one of [`scripts/`](scripts).
 `cluster_subsets.py` and `convergence_post.py` run from this directory on
 the stored results in `results/`.
 

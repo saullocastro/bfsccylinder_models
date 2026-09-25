@@ -5,7 +5,7 @@ The shell, laminate, load and mesh rule of test_Arbocz_Starnes_2002 of
 tests/test_koiter_cylinder_newton_raphson.py, von Karman (fkoiter_cyl_SS3 of
 koiter_cylinder) or Sanders (koiter_cylinder_sanders) kinematics, NLprebuck,
 one Koiter mode. Which edge condition is solved is set by the library on
-PYTHONPATH: the one of the branch, v = w = 0 along the whole edge (with the
+PYTHONPATH: the one of the models, v = w = 0 along the whole edge (with the
 axial translation removed by inertia relief since, which leaves lambda_c
 and b unchanged), or an export of an earlier commit, v and w fixed at the
 edge nodes only. Both are
@@ -48,7 +48,7 @@ prop = laminated_plate(stack=stack, laminaprop=(E11, E22, nu12, G12, G12, G12),
                        plyt=h/len(stack))
 Nxxunit = 10000.
 model = fkoiter_cyl_SS3_sanders if sanders else fkoiter_cyl_SS3
-#NOTE eps1 = 0.0005 as the reassessment runs, so that the expansion point
+#NOTE eps1 = 0.0005 as the runs of the convergence study, so that the expansion point
 #     is the same for both edge conditions
 out = model(L, R, nx, ny, prop, nint=4, num_eigvals=4,
             koiter_num_modes=1, Nxxunit=Nxxunit, NLprebuck=True,
